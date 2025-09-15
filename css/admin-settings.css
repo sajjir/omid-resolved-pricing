@@ -1,0 +1,266 @@
+/*
+ * Styles for WC Price Scraper Settings Page
+ * -----------------------------------------
+ * This stylesheet provides modern and clean styling for the plugin's admin settings page.
+ * It utilizes CSS variables for consistent theming and organizes styles logically.
+ */
+
+/* --- Variables for consistent theming --- */
+:root {
+    --wcps-primary-blue: #0073aa; /* WordPress primary blue */
+    --wcps-dark-blue: #005177;
+    --wcps-danger-red: #d63638;
+    --wcps-danger-red-hover: #b62b2d;
+    --wcps-border-color: #c3c4c7;
+    --wcps-light-gray: #f0f0f1;
+    --wcps-text-color: #32373c;
+    --wcps-secondary-text-color: #50575e;
+    --wcps-background-color: #f6f7f7;
+    --wcps-spacing-unit: 16px;
+    --wcps-border-radius: 4px;
+}
+
+/* --- General Layout & Postbox Styling --- */
+.wcps-settings-wrap {
+    max-width: 960px; /* Limit width for better readability */
+    margin-right: auto;
+    margin-left: auto;
+    padding: var(--wcps-spacing-unit);
+}
+
+.wcps-settings-wrap h1 {
+    color: var(--wcps-text-color);
+    font-size: 2em;
+    margin-bottom: var(--wcps-spacing-unit);
+}
+
+.wcps-settings-wrap .postbox {
+    background: #fff;
+    border: 1px solid var(--wcps-border-color);
+    border-radius: var(--wcps-border-radius);
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+    margin-bottom: var(--wcps-spacing-unit) * 2;
+    padding: 0;
+}
+
+.wcps-settings-wrap .postbox .hndle {
+    background: var(--wcps-light-gray);
+    border-bottom: 1px solid var(--wcps-border-color);
+    color: var(--wcps-text-color);
+    cursor: default; /* Prevent draggable cursor */
+    font-size: 1.1em;
+    font-weight: 600;
+    padding: 10px var(--wcps-spacing-unit);
+}
+
+.wcps-settings-wrap .postbox .inside {
+    padding: var(--wcps-spacing-unit);
+}
+
+/* --- Form Table Styling --- */
+.wcps-settings-wrap .form-table {
+    margin-top: 0;
+    width: 100%;
+}
+
+.wcps-settings-wrap .form-table th {
+    padding-left: 0;
+    padding-right: var(--wcps-spacing-unit);
+    padding-top: 10px;
+    padding-bottom: 10px;
+    text-align: right; /* RTL support */
+    vertical-align: top;
+    width: 200px;
+}
+
+.wcps-settings-wrap .form-table td {
+    padding-top: 10px;
+    padding-bottom: 10px;
+    vertical-align: middle;
+}
+
+.wcps-settings-wrap .form-table p.description {
+    color: var(--wcps-secondary-text-color);
+    font-size: 0.85em;
+    margin-top: 4px;
+    line-height: 1.4;
+}
+
+.wcps-settings-wrap .form-table strong {
+    color: var(--wcps-danger-red);
+    font-weight: 700;
+}
+
+.wcps-settings-wrap .form-table input[type="text"],
+.wcps-settings-wrap .form-table input[type="url"],
+.wcps-settings-wrap .form-table input[type="number"],
+.wcps-settings-wrap .form-table textarea {
+    background-color: #fff;
+    border: 1px solid var(--wcps-border-color);
+    border-radius: var(--wcps-border-radius);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.07);
+    max-width: 500px;
+    padding: 8px 10px;
+    width: 100%;
+}
+
+.wcps-settings-wrap .form-table textarea.code {
+    direction: ltr; /* Ensure code is LTR */
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; /* Monospaced font */
+    text-align: left;
+}
+
+/* --- Repeater Field Specific Styles --- */
+.wcps-repeater-table {
+    border-spacing: 0;
+}
+
+.wcps-repeater-table tr.wcps-rule-row:not(:last-child) {
+    border-bottom: 1px solid var(--wcps-light-gray);
+}
+
+.wcps-repeater-table td {
+    padding-top: 10px;
+    padding-bottom: 10px;
+    padding-left: 0;
+    padding-right: 0;
+}
+
+.wcps-repeater-table label {
+    display: inline-block;
+    margin-left: 8px; /* Spacing for RTL */
+    font-weight: 500;
+}
+
+.wcps-repeater-table input.regular-text {
+    width: 25em; /* Standard WordPress width */
+}
+
+.wcps-repeater-table .wcps-repeater-action {
+    padding: 10px 0 !important;
+    text-align: left;
+    width: 40px; /* Sufficient space for button */
+}
+
+.wcps-repeater-table .wcps-remove-rule {
+    background: none;
+    border: none;
+    box-shadow: none;
+    color: var(--wcps-danger-red);
+    cursor: pointer;
+    padding: 0 5px;
+    transition: background-color 0.2s ease;
+}
+
+.wcps-repeater-table .wcps-remove-rule:hover {
+    background-color: var(--wcps-light-gray);
+    border-radius: var(--wcps-border-radius);
+}
+
+.wcps-repeater-table .dashicons-trash {
+    vertical-align: middle;
+}
+
+.wcps-repeater-table tfoot td {
+    padding-top: var(--wcps-spacing-unit);
+}
+
+#wcps-add-rule {
+    margin-top: 10px;
+}
+
+#wcps-add-rule .dashicons {
+    margin-left: 4px; /* Spacing for RTL */
+    vertical-align: text-top;
+}
+
+/* --- Cron Job Status Section --- */
+.wcps-cron-status {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--wcps-spacing-unit);
+}
+
+.wcps-cron-status #cron_countdown {
+    background-color: var(--wcps-light-gray);
+    border: 1px solid var(--wcps-border-color);
+    border-radius: var(--wcps-border-radius);
+    color: var(--wcps-primary-blue);
+    font-size: 1.5em;
+    font-weight: 700;
+    margin-left: 8px; /* Spacing for RTL */
+    padding: 4px 12px;
+}
+
+.wcps-cron-status .wcps-cron-label {
+    font-weight: 600;
+}
+
+.wcps-cron-status .button .dashicons {
+    margin-left: 4px; /* Spacing for RTL */
+    vertical-align: text-top;
+}
+
+.wcps-cron-status .spinner {
+    float: none;
+    margin: 0;
+    visibility: hidden; /* Hidden by default, shown with JS */
+}
+
+.wcps-status-text {
+    display: block;
+    font-weight: 600;
+    margin-top: 8px;
+}
+
+/* --- Category Checklist (old style, if still used) --- */
+.category-checklist {
+    background: #fff;
+    border: 1px solid #ccc;
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 10px;
+}
+
+.category-checklist label {
+    display: block;
+    margin-bottom: 5px;
+}
+
+/* --- Danger Button (re-applied from inline style) --- */
+.button-danger {
+    background: var(--wcps-danger-red);
+    border-color: var(--wcps-danger-red-hover);
+    color: #fff;
+}
+
+.button-danger:hover,
+.button-danger:focus {
+    background: var(--wcps-danger-red-hover);
+    border-color: #9f2628; /* Darker red on hover */
+    color: #fff;
+}
+
+/* --- Footer Styling --- */
+.wcps-footer {
+    border-top: 1px solid var(--wcps-border-color);
+    color: var(--wcps-secondary-text-color);
+    margin-top: calc(2 * var(--wcps-spacing-unit));
+    padding-top: var(--wcps-spacing-unit);
+    text-align: center;
+}
+
+.wcps-footer b {
+    font-weight: 600;
+}
+
+.wcps-footer a {
+    color: var(--wcps-primary-blue);
+    text-decoration: none;
+}
+
+.wcps-footer a:hover {
+    color: var(--wcps-dark-blue);
+    text-decoration: underline;
+} 
