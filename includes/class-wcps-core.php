@@ -12,6 +12,30 @@ if (!class_exists('WCPS_Core')) {
 
         public function process_single_product_scrape($pid, $url, $is_ajax = false) {
             $this->plugin->debug_log("Starting scrape for product #{$pid} from URL: {$url}");
+            
+            // +++ شروع کد جدید: استعلام از ترب +++
+            $torob_url = get_post_meta($pid, '_torob_url', true);
+            if (!empty($torob_url)) {
+                $this->plugin->debug_log("Torob URL found for product #{$pid}. Starting Torob scrape.", 'TOROB_SCRAPE');
+                $torob_api_url = 'http://sajjcrapapi.qolamai.ir/sajjcrape?key=UXckq6pvj7&url=' . urlencode($torob_url . '/!mashhad!/');
+                
+                // از تابع کمکی جدید برای فراخوانی API ترب استفاده می‌کنیم
+                $raw_torob_data = $this->plugin->make_torob_api_call($torob_api_url);
+
+                if (is_wp_error($raw_torob_data)) {
+                    $error_message = 'Torob Error: ' . $raw_torob_data->get_error_message();
+                    update_post_meta($pid, '_last_torob_scrape_raw_result', $error_message);
+                    $this->plugin->debug_log($error_message, 'TOROB_ERROR');
+                } else {
+                    update_post_meta($pid, '_last_torob_scrape_raw_result', $raw_torob_data);
+                    $this->plugin->debug_log("Successfully scraped Torob data for product #{$pid}.", 'TOROB_SUCCESS');
+                }
+            } else {
+                // اگر لینک ترب وجود نداشت، نتیجه قبلی را پاک می‌کنیم
+                delete_post_meta($pid, '_last_torob_scrape_raw_result');
+            }
+            // +++ پایان کد جدید +++
+
             $raw_data = $this->plugin->make_api_call(WC_PRICE_SCRAPER_API_ENDPOINT . '?url=' . urlencode($url));
 
             if (is_wp_error($raw_data)) {

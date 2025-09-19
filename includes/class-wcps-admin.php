@@ -159,12 +159,22 @@ if (!class_exists('WCPS_Admin')) {
             global $post;
             echo '<div class="options_group">';
 
+            // --- فیلد اصلی ---
             woocommerce_wp_text_input([
                 'id'          => '_source_url',
                 'label'       => __('لینک منبع قیمت', 'wc-price-scraper'),
                 'desc_tip'    => true,
                 'description' => __('لینک کامل محصول در سایت مرجع را وارد کنید.', 'wc-price-scraper')
             ]);
+
+            // +++ شروع کد جدید: اضافه کردن فیلد ترب +++
+            woocommerce_wp_text_input([
+                'id'          => '_torob_url',
+                'label'       => __('لینک منبع ترب', 'wc-price-scraper'),
+                'desc_tip'    => true,
+                'description' => __('لینک صفحه محصول در سایت ترب را برای استعلام قیمت دوم وارد کنید.', 'wc-price-scraper')
+            ]);
+            // +++ پایان کد جدید +++
             
             woocommerce_wp_checkbox([
                 'id'          => '_auto_sync_variations',
@@ -192,21 +202,34 @@ if (!class_exists('WCPS_Admin')) {
                 $display_time = date_i18n(get_option('date_format') . ' @ ' . get_option('time_format'), $last_scraped_timestamp);
                 echo '<p class="form-field"><strong>' . __('آخرین اسکرپ موفق:', 'wc-price-scraper') . '</strong> ' . esc_html($display_time) . '</p>';
 
-                // Display the raw scrape result
+                // --- نمایش نتیجه خام اصلی ---
                 $raw_result = get_post_meta($post->ID, '_last_scrape_raw_result', true);
                 if ($raw_result) {
                     echo '<strong>' . __('آخرین نتیجه خام دریافتی:', 'wc-price-scraper') . '</strong>';
                     echo '<pre style="direction: ltr; text-align: left; background-color: #f5f5f5; border: 1px solid #ccc; padding: 10px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word;">';
-                    // Check if it's a JSON string and pretty-print it
                     $json_data = json_decode($raw_result);
                     if (json_last_error() === JSON_ERROR_NONE) {
                         echo esc_html(json_encode($json_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
                     } else {
-                        // If it's not JSON (e.g., an error message), just display as is
                         echo esc_html($raw_result);
                     }
                     echo '</pre>';
                 }
+
+                // +++ شروع کد جدید: نمایش نتیجه خام ترب +++
+                $torob_raw_result = get_post_meta($post->ID, '_last_torob_scrape_raw_result', true);
+                if ($torob_raw_result) {
+                    echo '<strong>' . __('آخرین نتیجه خام دریافتی ترب:', 'wc-price-scraper') . '</strong>';
+                    echo '<pre style="direction: ltr; text-align: left; background-color: #e6f7ff; border: 1px solid #91d5ff; padding: 10px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word;">';
+                    $json_data_torob = json_decode($torob_raw_result);
+                    if (json_last_error() === JSON_ERROR_NONE) {
+                        echo esc_html(json_encode($json_data_torob, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+                    } else {
+                        echo esc_html($torob_raw_result);
+                    }
+                    echo '</pre>';
+                }
+                // +++ پایان کد جدید +++
             }
             
             echo '</div>';
@@ -221,11 +244,19 @@ if (!class_exists('WCPS_Admin')) {
             if (isset($_POST['_source_url'])) {
                 update_post_meta($post_id, '_source_url', esc_url_raw($_POST['_source_url']));
             }
+
+            // +++ شروع کد جدید: ذخیره فیلد ترب +++
+            if (isset($_POST['_torob_url'])) {
+                update_post_meta($post_id, '_torob_url', esc_url_raw($_POST['_torob_url']));
+            }
+            // +++ پایان کد جدید +++
+
             if (isset($_POST['_price_adjustment_percent'])) {
                 update_post_meta($post_id, '_price_adjustment_percent', sanitize_text_field($_POST['_price_adjustment_percent']));
             }
             update_post_meta($post_id, '_auto_sync_variations', isset($_POST['_auto_sync_variations']) ? 'yes' : 'no');
         }
+
 
         /**
          * Adds a "protected" checkbox to the variation pricing options.
@@ -341,7 +372,7 @@ if (!class_exists('WCPS_Admin')) {
          * @param int $lines_count The number of lines to retrieve.
          * @return array An array of log lines.
          */
-        private function get_log_lines($lines_count = 63) {
+        public function get_log_lines($lines_count = 63) {
             $log_path = $this->plugin->get_log_path();
             if (!file_exists($log_path)) {
                 return [__('فایل لاگ یافت نشد.', 'wc-price-scraper')];

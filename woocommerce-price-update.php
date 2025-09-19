@@ -2,7 +2,7 @@
 /*
  * Plugin Name: WooCommerce Price Scraper
  * Description: اسکرپ قیمت محصولات از سایت مرجع، ساخت اتو واریشن‌ها، تنظیمات فیلتر گارانتی و دسته‌بندی استثنا
- * Version: 4.0 - Fully Refactored & Patched
+ * Version: 4.1 - Torob Integration
  * Author: سج - SAJJ.IR
  * Text Domain: wc-price-scraper
  * Domain Path: /languages
@@ -10,11 +10,11 @@
 
 if (!defined('ABSPATH')) exit;
 
-define('WC_PRICE_SCRAPER_VERSION', '4.0');
+define('WC_PRICE_SCRAPER_VERSION', '4.1');
 define('WC_PRICE_SCRAPER_PATH', plugin_dir_path(__FILE__));
 define('WC_PRICE_SCRAPER_URL', plugin_dir_url(__FILE__));
 define('WC_PRICE_SCRAPER_API_ENDPOINT', 'http://45.156.185.161/scrape');
-define('WC_PRICE_SCRAPER_DEBUG', false);
+define('WC_PRICE_SCRAPER_DEBUG', true); // Debug mode is enabled
 
 if (!class_exists('WC_Price_Scraper')) {
     final class WC_Price_Scraper {
@@ -194,6 +194,30 @@ if (!class_exists('WC_Price_Scraper')) {
             }
             return new WP_Error('api_timeout', "cURL Error after {$attempts} attempts: {$error} (HTTP Code: {$http_code})");
         }
+
+        // +++ شروع کد جدید: تابع کمکی برای API ترب +++
+        public function make_torob_api_call($url) {
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL            => $url,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT        => 7, // زمان انتظار ۷ ثانیه
+                CURLOPT_CONNECTTIMEOUT => 5,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_FOLLOWLOCATION => true,
+            ]);
+            $body      = curl_exec($ch);
+            $error     = curl_error($ch);
+            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            
+            if ($error || $http_code < 200 || $http_code >= 300) {
+                return new WP_Error('torob_api_error', "cURL Error: {$error} (HTTP Code: {$http_code})");
+            }
+            return $body;
+        }
+        // +++ پایان کد جدید +++
+
 
         public function init_global_attributes() {
             if (!taxonomy_exists('pa_color')) {
