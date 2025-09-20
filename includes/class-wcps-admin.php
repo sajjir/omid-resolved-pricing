@@ -167,14 +167,13 @@ if (!class_exists('WCPS_Admin')) {
                 'description' => __('لینک کامل محصول در سایت مرجع را وارد کنید.', 'wc-price-scraper')
             ]);
 
-            // +++ شروع کد جدید: اضافه کردن فیلد ترب +++
+            // --- فیلد ترب ---
             woocommerce_wp_text_input([
                 'id'          => '_torob_url',
                 'label'       => __('لینک منبع ترب', 'wc-price-scraper'),
                 'desc_tip'    => true,
                 'description' => __('لینک صفحه محصول در سایت ترب را برای استعلام قیمت دوم وارد کنید.', 'wc-price-scraper')
             ]);
-            // +++ پایان کد جدید +++
             
             woocommerce_wp_checkbox([
                 'id'          => '_auto_sync_variations',
@@ -182,12 +181,27 @@ if (!class_exists('WCPS_Admin')) {
                 'description' => __('با فعال بودن این گزینه، محصول در به‌روزرسانی‌های خودکار (کرون‌جاب) بررسی می‌شود.', 'wc-price-scraper')
             ]);
 
+            // +++ شروع کد جدید: اضافه کردن دکمه رادیویی ترب +++
+            woocommerce_wp_radio([
+                'id'            => '_torob_price_source',
+                'label'         => __('مبنای قیمت ترب', 'wc-price-scraper'),
+                'options'       => [
+                    'mashhad' => __('مشهد', 'wc-price-scraper'),
+                    'iran'    => __('ایران', 'wc-price-scraper'),
+                ],
+                'value'         => get_post_meta($post->ID, '_torob_price_source', true) ?: 'mashhad', // مقدار پیش‌فرض مشهد
+                'description'   => __('انتخاب کنید که قیمت کدام منطقه از ترب به عنوان مبنای رقابت در نظر گرفته شود.', 'wc-price-scraper'),
+                'desc_tip'      => true,
+            ]);
+            // +++ پایان کد جدید +++
+
+
             woocommerce_wp_text_input([
                 'id'          => '_price_adjustment_percent',
                 'label'       => __('تنظیم قیمت (درصد)', 'wc-price-scraper'),
                 'type'        => 'number',
                 'desc_tip'    => true,
-                'description' => __('یک عدد برای تغییر قیمت وارد کنید. مثال: 10 برای 10% افزایش یا -5 برای 5% کاهش.', 'wc-price-scraper'),
+                'description' => __('یک عدد برای تغییر قیمت وارد کنید. مثال: 10 برای 10% افزایش یا -1.5 برای 1.5% کاهش.', 'wc-price-scraper'),
                 'custom_attributes' => ['step' => 'any']
             ]);
             
@@ -216,7 +230,7 @@ if (!class_exists('WCPS_Admin')) {
                     echo '</pre>';
                 }
 
-                // +++ شروع کد جدید: نمایش نتیجه خام ترب +++
+                // --- نمایش نتیجه خام ترب ---
                 $torob_raw_result = get_post_meta($post->ID, '_last_torob_scrape_raw_result', true);
                 if ($torob_raw_result) {
                     echo '<strong>' . __('آخرین نتیجه خام دریافتی ترب:', 'wc-price-scraper') . '</strong>';
@@ -229,7 +243,6 @@ if (!class_exists('WCPS_Admin')) {
                     }
                     echo '</pre>';
                 }
-                // +++ پایان کد جدید +++
             }
             
             echo '</div>';
@@ -245,11 +258,16 @@ if (!class_exists('WCPS_Admin')) {
                 update_post_meta($post_id, '_source_url', esc_url_raw($_POST['_source_url']));
             }
 
-            // +++ شروع کد جدید: ذخیره فیلد ترب +++
             if (isset($_POST['_torob_url'])) {
                 update_post_meta($post_id, '_torob_url', esc_url_raw($_POST['_torob_url']));
             }
+
+            // +++ شروع کد جدید: ذخیره دکمه رادیویی ترب +++
+            if (isset($_POST['_torob_price_source']) && in_array($_POST['_torob_price_source'], ['mashhad', 'iran'])) {
+                update_post_meta($post_id, '_torob_price_source', sanitize_text_field($_POST['_torob_price_source']));
+            }
             // +++ پایان کد جدید +++
+
 
             if (isset($_POST['_price_adjustment_percent'])) {
                 update_post_meta($post_id, '_price_adjustment_percent', sanitize_text_field($_POST['_price_adjustment_percent']));

@@ -13,13 +13,14 @@ if (!class_exists('WCPS_Core')) {
         public function process_single_product_scrape($pid, $url, $is_ajax = false) {
             $this->plugin->debug_log("Starting scrape for product #{$pid} from URL: {$url}");
             
-            // +++ شروع کد جدید: استعلام از ترب +++
+            // --- استعلام از ترب ---
             $torob_url = get_post_meta($pid, '_torob_url', true);
             if (!empty($torob_url)) {
                 $this->plugin->debug_log("Torob URL found for product #{$pid}. Starting Torob scrape.", 'TOROB_SCRAPE');
-                $torob_api_url = 'http://sajjcrapapi.qolamai.ir/sajjcrape?key=UXckq6pvj7&url=' . urlencode($torob_url . '/!mashhad!/');
+                $torob_price_source_key = get_post_meta($pid, '_torob_price_source', true) ?: 'mashhad';
+                $api_suffix = $torob_price_source_key === 'mashhad' ? '/!mashhad!/' : '/';
+                $torob_api_url = 'http://sajjcrapapi.qolamai.ir/sajjcrape?key=UXckq6pvj7&url=' . urlencode($torob_url . $api_suffix);
                 
-                // از تابع کمکی جدید برای فراخوانی API ترب استفاده می‌کنیم
                 $raw_torob_data = $this->plugin->make_torob_api_call($torob_api_url);
 
                 if (is_wp_error($raw_torob_data)) {
@@ -31,30 +32,23 @@ if (!class_exists('WCPS_Core')) {
                     $this->plugin->debug_log("Successfully scraped Torob data for product #{$pid}.", 'TOROB_SUCCESS');
                 }
             } else {
-                // اگر لینک ترب وجود نداشت، نتیجه قبلی را پاک می‌کنیم
                 delete_post_meta($pid, '_last_torob_scrape_raw_result');
             }
-            // +++ پایان کد جدید +++
 
             $raw_data = $this->plugin->make_api_call(WC_PRICE_SCRAPER_API_ENDPOINT . '?url=' . urlencode($url));
 
             if (is_wp_error($raw_data)) {
-                // +++ START: Conditional Logic +++
-                // Check if the setting to make product out of stock on failure is enabled.
                 if (get_option('wcps_on_failure_set_outofstock', 'yes') === 'yes') {
                     $this->plugin->debug_log("Setting product #{$pid} to out of stock due to scrape failure as per settings.");
                     $this->set_all_product_variations_outof_stock($pid);
                 } else {
                     $this->plugin->debug_log("Skipping stock change for product #{$pid} on failure as per settings.");
                 }
-                // +++ END: Conditional Logic +++
-
                 update_post_meta($pid, '_scraped_data', []);
-                update_post_meta($pid, '_last_scrape_raw_result', 'Error: ' . $raw_data->get_error_message()); // Save error
+                update_post_meta($pid, '_last_scrape_raw_result', 'Error: ' . $raw_data->get_error_message());
                 return $raw_data;
             }
             
-            // Save the raw successful result
             update_post_meta($pid, '_last_scrape_raw_result', $raw_data);
 
             $data = json_decode($raw_data, true);
@@ -64,40 +58,28 @@ if (!class_exists('WCPS_Core')) {
                 return new WP_Error('no_data', __('داده معتبری از API اسکرپینگ دریافت نشد.', 'wc-price-scraper'));
             }
 
-            // ===================================================================
-            // +++ START: NEW ADVANCED FILTERING LOGIC +++
-            // ===================================================================
-
-            // --- Step 1: Apply Conditional Removal Rules (with fallback) ---
+            // --- فیلترینگ پیشرفته ---
             $conditional_rules = get_option('wcps_conditional_rules', []);
             $data_after_conditional_filter = $data;
 
             if (!empty($conditional_rules)) {
                 $this->plugin->debug_log("Applying conditional rules for product #{$pid}", $conditional_rules);
-                $temp_data = $data; // Work on a temporary copy
-
+                $temp_data = $data;
                 foreach ($conditional_rules as $rule) {
-                    $key_to_check = $rule['key'];
-                    $value_to_ignore = $rule['value'];
-
-                    // Create a list of items that DON'T match the ignore rule
+                    $key_to_check = $rule['key']; $value_to_ignore = $rule['value'];
                     $filtered_tentatively = array_values(array_filter($temp_data, function ($item) use ($key_to_check, $value_to_ignore) {
                         return !isset($item[$key_to_check]) || $item[$key_to_check] != $value_to_ignore;
                     }));
-
-                    // THE CORE LOGIC: If filtering leaves at least one item, apply it. Otherwise, ignore the rule.
                     if (!empty($filtered_tentatively)) {
-                        $temp_data = $filtered_tentatively; // The filter was successful, update the list
+                        $temp_data = $filtered_tentatively;
                         $this->plugin->debug_log("Rule ({$key_to_check} = {$value_to_ignore}) applied. Items left: " . count($temp_data));
                     } else {
-                        // The filter would remove everything, so we ignore this rule and log it.
                         $this->plugin->debug_log("Rule ({$key_to_check} = {$value_to_ignore}) ignored because it would remove all variations.");
                     }
                 }
                 $data_after_conditional_filter = $temp_data;
             }
 
-            // --- Step 2: Apply "Always Hide & Deduplicate" Logic ---
             $always_hide_keys = array_filter(array_map('trim', explode("\n", get_option('wcps_always_hide_keys', ''))));
             $final_data = [];
 
@@ -106,37 +88,25 @@ if (!class_exists('WCPS_Core')) {
                 $seen_fingerprints = [];
                 foreach ($data_after_conditional_filter as $item) {
                     $core_attributes = $item;
-                    foreach ($always_hide_keys as $key_to_hide) {
-                        unset($core_attributes[$key_to_hide]);
-                    }
-                    
-                    // Create a unique fingerprint based on remaining attributes
+                    foreach ($always_hide_keys as $key_to_hide) { unset($core_attributes[$key_to_hide]); }
                     $fingerprint = md5(json_encode($core_attributes));
-
                     if (!in_array($fingerprint, $seen_fingerprints)) {
                         $seen_fingerprints[] = $fingerprint;
-                        $final_data[] = $item; // Add the ORIGINAL item to keep all its data for now
+                        $final_data[] = $item;
                     }
                 }
             } else {
-                // If no hide/deduplicate rules, just use the data from the conditional filter
                 $final_data = $data_after_conditional_filter;
             }
 
-            // Ensure we remove duplicates even if no rules are set
             $final_data = array_values(array_map('unserialize', array_unique(array_map('serialize', $final_data))));
             
-            // ===================================================================
-            // +++ END: NEW ADVANCED FILTERING LOGIC +++
-            // ===================================================================
-
             if (empty($final_data)) {
                 $this->set_all_product_variations_outof_stock($pid);
                 update_post_meta($pid, '_scraped_data', []);
                 return new WP_Error('filtered_out', __('همه داده‌ها توسط قوانین فیلترینگ حذف شدند.', 'wc-price-scraper'));
             }
 
-            // Use the processed data from now on
             update_post_meta($pid, '_scraped_data', $final_data);
 
             $auto_sync_enabled = get_post_meta($pid, '_auto_sync_variations', true) === 'yes';
@@ -148,197 +118,255 @@ if (!class_exists('WCPS_Core')) {
         }
 
 	public function sync_product_variations($pid, $scraped_data) {
-    $this->plugin->debug_log("Starting smart variation sync for product #{$pid}");
-    $parent_product = wc_get_product($pid);
-    if (!$parent_product || !$parent_product->is_type('variable')) {
-        $this->plugin->debug_log("Parent product #{$pid} not found or not variable for sync.");
-        return;
-    }
+            $this->plugin->debug_log("Starting smart variation sync for product #{$pid}");
+            $parent_product = wc_get_product($pid);
+            if (!$parent_product || !$parent_product->is_type('variable')) {
+                $this->plugin->debug_log("Parent product #{$pid} not found or not variable for sync.");
+                return;
+            }
 
-    $this->prepare_parent_attributes_stable($pid, $scraped_data);
+            $this->prepare_parent_attributes_stable($pid, $scraped_data);
 
-    $existing_variation_ids = $parent_product->get_children();
-    $all_variations_map = [];
-    $protected_variation_ids = [];
+            $existing_variation_ids = $parent_product->get_children();
+            $all_variations_map = [];
+            $protected_variation_ids = [];
 
-    foreach ($existing_variation_ids as $var_id) {
-        if (get_post_meta($var_id, '_wcps_is_protected', true) === 'yes') {
-            $protected_variation_ids[] = $var_id;
-        }
-        $variation = wc_get_product($var_id);
-        if (!$variation) continue;
-        $attributes = $variation->get_attributes();
-        ksort($attributes);
-        $all_variations_map[md5(json_encode($attributes))] = $var_id;
-    }
+            foreach ($existing_variation_ids as $var_id) {
+                if (get_post_meta($var_id, '_wcps_is_protected', true) === 'yes') {
+                    $protected_variation_ids[] = $var_id;
+                }
+                $variation = wc_get_product($var_id);
+                if (!$variation) continue;
+                $attributes = $variation->get_attributes();
+                ksort($attributes);
+                $all_variations_map[md5(json_encode($attributes))] = $var_id;
+            }
 
-    $created_or_updated = [];
-    foreach ($scraped_data as $item) {
-        $attr_data = [];
-        
-        foreach ($item as $k => $v) {
-            if (in_array(strtolower($k), ['price', 'stock', 'url', 'image', 'seller']) || $v === '' || $v === null) continue;
+            // ===================================================================
+            // +++ شروع منطق جدید قیمت‌گذاری هوشمند +++
+            // ===================================================================
+            $this->plugin->debug_log("--- Starting Smart Pricing Logic for #{$pid} ---", 'SMART_PRICE');
             
-            $clean_key = sanitize_title(urldecode(str_replace(['attribute_pa_', 'pa_'], '', $k)));
-            $taxonomy = 'pa_' . $clean_key;
-            $term_name = is_array($v) ? ($v['label'] ?? $v['name']) : $v;
+            // مرحله ۱: محاسبه قیمت استاندارد برای همه وریشن‌ها
+            $this->plugin->debug_log("Step 1: Calculating standard prices for all variations.", 'SMART_PRICE');
+            $adjustment_percent = (float) get_post_meta($pid, '_price_adjustment_percent', true);
+            $calculated_prices = []; // [variation_hash => ['base_price' => X, 'standard_price' => Y]]
+            $target_variation_hash = null;
+            $min_standard_price = PHP_INT_MAX;
 
-            if (empty($term_name)) continue;
+            foreach ($scraped_data as $item) {
+                $attr_data = [];
+                foreach ($item as $k => $v) {
+                    if (in_array(strtolower($k), ['price', 'stock', 'url', 'image', 'seller']) || $v === '' || $v === null) continue;
+                    $clean_key = sanitize_title(urldecode(str_replace(['attribute_pa_', 'pa_'], '', $k)));
+                    $taxonomy = 'pa_' . $clean_key;
+                    $term_name = is_array($v) ? ($v['label'] ?? $v['name']) : $v;
+                    if (empty($term_name)) continue;
+                    $term = get_term_by('name', $term_name, $taxonomy);
+                    $attr_data[$taxonomy] = $term ? $term->slug : sanitize_title($term_name);
+                }
+                if (empty($attr_data)) continue;
+                ksort($attr_data);
+                $variation_hash = md5(json_encode($attr_data));
 
-            $term = get_term_by('name', $term_name, $taxonomy);
+                $base_price = isset($item['price']) ? (float) preg_replace('/[^0-9.]/', '', $item['price']) : 0;
+                $standard_price = $base_price * (1 + ($adjustment_percent / 100));
+                $calculated_prices[$variation_hash] = ['base_price' => $base_price, 'standard_price' => $standard_price];
 
-            if ($term && !is_wp_error($term)) {
-                $attr_data[$taxonomy] = $term->slug;
-            } else {
-                $attr_data[$taxonomy] = sanitize_title($term_name);
-                $this->plugin->debug_log("Warning: Term '{$term_name}' not found for taxonomy '{$taxonomy}'. Used a generated slug as fallback.");
-            }
-        }
-        
-        if (empty($attr_data)) continue;
-
-        ksort($attr_data);
-        $variation_hash = md5(json_encode($attr_data));
-        
-        $var_id = $all_variations_map[$variation_hash] ?? null;
-
-        if ($var_id && in_array($var_id, $protected_variation_ids)) {
-            $created_or_updated[] = $var_id;
-            $this->plugin->debug_log("Skipping update for protected variation #{$var_id}.");
-            continue;
-        }
-
-        $variation = ($var_id) ? wc_get_product($var_id) : new WC_Product_Variation();
-        if (!$var_id) {
-            $variation->set_parent_id($pid);
-        }
-        
-        $variation->set_attributes($attr_data);
-        
-        if (isset($item['price']) && is_numeric(preg_replace('/[^0-9.]/', '', $item['price']))) {
-            $price = (float) preg_replace('/[^0-9.]/', '', $item['price']);
-            $adjustment_percent = get_post_meta($pid, '_price_adjustment_percent', true);
-            if (is_numeric($adjustment_percent) && $adjustment_percent != 0) {
-                $adjustment_value = (float) $adjustment_percent;
-                $price = $price * (1 + ($adjustment_value / 100));
-                $price = round($price, 2);
-            }
-            $variation->set_price($price);
-            $variation->set_regular_price($price);
-        }
-        if (isset($item['stock'])) {
-            $outofstock_keywords = ['ناموجود', 'نمی باشد', 'نمیباشد', 'اتمام'];
-            $is_outofstock = false;
-            foreach ($outofstock_keywords as $keyword) {
-                if (strpos($item['stock'], $keyword) !== false) {
-                    $is_outofstock = true;
-                    break;
+                // مرحله ۲: پیدا کردن ارزان‌ترین وریشن (وریشن هدف)
+                if ($standard_price > 0 && $standard_price < $min_standard_price) {
+                    $min_standard_price = $standard_price;
+                    $target_variation_hash = $variation_hash;
                 }
             }
-            $variation->set_stock_status($is_outofstock ? 'outofstock' : 'instock');
-        }
-        
-        $variation_id = $variation->save();
-        if (empty($variation->get_sku())) {
-            $variation->set_sku((string)$variation_id);
-            $variation->save();
-        }
-        $created_or_updated[] = $variation_id;
-    }
+            $this->plugin->debug_log("Step 2: Target variation identified. Hash: {$target_variation_hash}, Min Standard Price: {$min_standard_price}", 'SMART_PRICE');
 
-    $unprotected_variation_ids = array_diff($existing_variation_ids, $protected_variation_ids);
-    $variations_to_delete = array_diff($unprotected_variation_ids, $created_or_updated);
-
-    foreach ($variations_to_delete as $var_id_to_delete) {
-        wp_delete_post($var_id_to_delete, true);
-        $this->plugin->debug_log("Deleted obsolete variation #{$var_id_to_delete}.");
-    }
-    
-    $this->plugin->debug_log("Smart variation sync complete for product #{$pid}.");
-    
-    // ===================================================================
-    // +++ START: NEW LOGIC FOR SETTING DEFAULT VARIATION +++
-    // ===================================================================
-    if (!empty($scraped_data)) {
-        $in_stock_items = [];
-        $out_of_stock_items = [];
-        $outofstock_keywords = ['ناموجود', 'نمی باشد', 'نمیباشد', 'اتمام'];
-
-        // Step 1: Separate items based on stock status
-        foreach ($scraped_data as $item) {
-            $is_outofstock = false;
-            if (isset($item['stock'])) {
-                foreach ($outofstock_keywords as $keyword) {
-                    if (strpos($item['stock'], $keyword) !== false) {
-                        $is_outofstock = true;
-                        break;
+            // مرحله ۳: استخراج قیمت ترب
+            $this->plugin->debug_log("Step 3: Extracting Torob price.", 'SMART_PRICE');
+            $torob_price = 0;
+            $torob_raw_result = get_post_meta($pid, '_last_torob_scrape_raw_result', true);
+            if ($torob_raw_result) {
+                $torob_data = json_decode($torob_raw_result, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($torob_data)) {
+                    $source_key = get_post_meta($pid, '_torob_price_source', true) ?: 'mashhad';
+                    $message_key = $source_key === 'mashhad' ? 'OK (مشهد)' : 'OK (ایران)';
+                    
+                    foreach ($torob_data as $entry) {
+                        if (isset($entry['message']) && $entry['message'] === $message_key && isset($entry['data']['lowest_price'])) {
+                            $torob_price = (float) $entry['data']['lowest_price'];
+                            break;
+                        }
                     }
                 }
             }
-            if (!isset($item['price']) || empty($item['price'])) {
-                $is_outofstock = true;
-            }
+            $this->plugin->debug_log("Torob price extracted: {$torob_price}", 'SMART_PRICE');
 
-            if ($is_outofstock) {
-                $out_of_stock_items[] = $item;
-            } else {
-                $in_stock_items[] = $item;
-            }
-        }
+            // مرحله ۴: اعمال منطق اصلی قیمت‌گذاری
+            $this->plugin->debug_log("Step 4: Applying main pricing logic.", 'SMART_PRICE');
+            $final_prices = []; // [variation_hash => final_price]
+            
+            // اگر قیمت معتبر از ترب داشتیم و وریشن هدف مشخص بود
+            if ($torob_price > 0 && $target_variation_hash !== null) {
+                $target_standard_price = $calculated_prices[$target_variation_hash]['standard_price'];
+                $new_target_price = $target_standard_price; // قیمت پیش‌فرض
 
-        // Step 2: Find the cheapest item, prioritizing in-stock items
-        $lowest_price_item = null;
-        $target_items = !empty($in_stock_items) ? $in_stock_items : $out_of_stock_items;
-        
-        if (!empty($target_items)) {
-            $min_price = PHP_INT_MAX;
-            foreach ($target_items as $item) {
-                if (isset($item['price'])) {
-                    $cleaned_price = (float) preg_replace('/[^0-9.]/', '', $item['price']);
-                    if ($cleaned_price > 0 && $cleaned_price < $min_price) {
-                        $min_price = $cleaned_price;
-                        $lowest_price_item = $item;
+                // سناریو ۱: قیمت ما بالاتر از ترب است (تلاش برای کاهش قیمت)
+                if ($target_standard_price > $torob_price) {
+                    $this->plugin->debug_log("Scenario 1: Our price is higher. Our: {$target_standard_price}, Torob: {$torob_price}", 'SMART_PRICE');
+                    $max_allowed_discount_price = $target_standard_price; // اگر درصد مثبت باشد، تخفیف مجاز نیست
+                    if ($adjustment_percent < 0) {
+                       $max_allowed_discount_price = $calculated_prices[$target_variation_hash]['base_price'] * (1 + ($adjustment_percent / 100));
                     }
+                    $new_target_price = max($max_allowed_discount_price, $torob_price - 1000);
+                    $this->plugin->debug_log("New target price (Scenario 1): {$new_target_price} (Based on Max Discount: {$max_allowed_discount_price})", 'SMART_PRICE');
+
+                // سناریو ۲: قیمت ما پایین‌تر از ترب است (تلاش برای افزایش سود)
+                } else {
+                    $this->plugin->debug_log("Scenario 2: Our price is lower. Our: {$target_standard_price}, Torob: {$torob_price}", 'SMART_PRICE');
+                    $new_target_price = $torob_price - 1000;
+                    $this->plugin->debug_log("New target price (Scenario 2): {$new_target_price}", 'SMART_PRICE');
+                }
+
+                // محاسبه اختلاف قیمت برای تنظیم سایر وریشن‌ها
+                $price_diff = $new_target_price - $target_standard_price;
+                
+                // تنظیم قیمت نهایی برای همه وریشن‌ها بر اساس اختلاف
+                foreach ($calculated_prices as $hash => $prices) {
+                    $final_prices[$hash] = $prices['standard_price'] + $price_diff;
+                }
+                $this->plugin->debug_log("Price difference calculated: {$price_diff}. All other variations adjusted accordingly.", 'SMART_PRICE');
+
+            } else {
+                // سناریو ۳ و ۴: قیمت ترب نامعتبر یا لینک ترب موجود نیست. استفاده از قیمت استاندارد
+                $this->plugin->debug_log("Scenario 3/4: No valid Torob price or URL. Using standard prices.", 'SMART_PRICE');
+                foreach ($calculated_prices as $hash => $prices) {
+                    $final_prices[$hash] = $prices['standard_price'];
                 }
             }
-        }
 
-        // Step 3: Set default attributes based on the found item
-        if ($lowest_price_item !== null) {
-            $default_attributes = [];
-            $non_attribute_keys = ['price', 'stock', 'url', 'image', 'seller'];
-            foreach ($lowest_price_item as $key => $value) {
-                if (in_array(strtolower($key), $non_attribute_keys) || empty($value)) {
+            // ===================================================================
+            // +++ پایان منطق جدید قیمت‌گذاری هوشمند +++
+            // ===================================================================
+
+
+            // --- حلقه اصلی برای ایجاد و به‌روزرسانی وریشن‌ها ---
+            $created_or_updated = [];
+            foreach ($scraped_data as $item) {
+                $attr_data = [];
+                foreach ($item as $k => $v) {
+                    if (in_array(strtolower($k), ['price', 'stock', 'url', 'image', 'seller']) || $v === '' || $v === null) continue;
+                    $clean_key = sanitize_title(urldecode(str_replace(['attribute_pa_', 'pa_'], '', $k)));
+                    $taxonomy = 'pa_' . $clean_key;
+                    $term_name = is_array($v) ? ($v['label'] ?? $v['name']) : $v;
+                    if (empty($term_name)) continue;
+                    $term = get_term_by('name', $term_name, $taxonomy);
+                    $attr_data[$taxonomy] = $term ? $term->slug : sanitize_title($term_name);
+                }
+                if (empty($attr_data)) continue;
+                ksort($attr_data);
+                $variation_hash = md5(json_encode($attr_data));
+                
+                $var_id = $all_variations_map[$variation_hash] ?? null;
+
+                if ($var_id && in_array($var_id, $protected_variation_ids)) {
+                    $created_or_updated[] = $var_id;
+                    $this->plugin->debug_log("Skipping update for protected variation #{$var_id}.");
                     continue;
                 }
-                $taxonomy_key = $key;
-                if (strpos($key, 'pa_') !== 0) {
-                    $taxonomy_key = 'pa_' . sanitize_title($key);
+
+                $variation = ($var_id) ? wc_get_product($var_id) : new WC_Product_Variation();
+                if (!$var_id) {
+                    $variation->set_parent_id($pid);
                 }
-                $term_name = is_array($value) ? ($value['label'] ?? $value['name']) : $value;
-                $term = get_term_by('name', $term_name, $taxonomy_key);
-                if ($term && !is_wp_error($term)) {
-                    $default_attributes[$taxonomy_key] = $term->slug;
+                
+                $variation->set_attributes($attr_data);
+                
+                // مرحله ۵: ذخیره قیمت نهایی محاسبه شده
+                if (isset($final_prices[$variation_hash])) {
+                    $price = round($final_prices[$variation_hash], 2);
+                    $variation->set_price($price);
+                    $variation->set_regular_price($price);
+                }
+
+                if (isset($item['stock'])) {
+                    $outofstock_keywords = ['ناموجود', 'نمی باشد', 'نمیباشد', 'اتمام'];
+                    $is_outofstock = false;
+                    foreach ($outofstock_keywords as $keyword) {
+                        if (strpos($item['stock'], $keyword) !== false) {
+                            $is_outofstock = true;
+                            break;
+                        }
+                    }
+                    $variation->set_stock_status($is_outofstock ? 'outofstock' : 'instock');
+                }
+                
+                $variation_id = $variation->save();
+                if (empty($variation->get_sku())) {
+                    $variation->set_sku((string)$variation_id);
+                    $variation->save();
+                }
+                $created_or_updated[] = $variation_id;
+            }
+
+            $unprotected_variation_ids = array_diff($existing_variation_ids, $protected_variation_ids);
+            $variations_to_delete = array_diff($unprotected_variation_ids, $created_or_updated);
+
+            foreach ($variations_to_delete as $var_id_to_delete) {
+                wp_delete_post($var_id_to_delete, true);
+                $this->plugin->debug_log("Deleted obsolete variation #{$var_id_to_delete}.");
+            }
+            
+            $this->plugin->debug_log("Smart variation sync complete for product #{$pid}.");
+            
+            // --- تنظیم وریشن پیش‌فرض (بدون تغییر) ---
+            if (!empty($scraped_data)) {
+                $in_stock_items = []; $out_of_stock_items = [];
+                $outofstock_keywords = ['ناموجود', 'نمی باشد', 'نمیباشد', 'اتمام'];
+                foreach ($scraped_data as $item) {
+                    $is_outofstock = false;
+                    if (isset($item['stock'])) {
+                        foreach ($outofstock_keywords as $keyword) {
+                            if (strpos($item['stock'], $keyword) !== false) { $is_outofstock = true; break; }
+                        }
+                    }
+                    if (!isset($item['price']) || empty($item['price'])) { $is_outofstock = true; }
+                    if ($is_outofstock) { $out_of_stock_items[] = $item; } else { $in_stock_items[] = $item; }
+                }
+                $lowest_price_item = null;
+                $target_items = !empty($in_stock_items) ? $in_stock_items : $out_of_stock_items;
+                if (!empty($target_items)) {
+                    $min_price = PHP_INT_MAX;
+                    foreach ($target_items as $item) {
+                        if (isset($item['price'])) {
+                            $cleaned_price = (float) preg_replace('/[^0-9.]/', '', $item['price']);
+                            if ($cleaned_price > 0 && $cleaned_price < $min_price) {
+                                $min_price = $cleaned_price;
+                                $lowest_price_item = $item;
+                            }
+                        }
+                    }
+                }
+                if ($lowest_price_item !== null) {
+                    $default_attributes = [];
+                    $non_attribute_keys = ['price', 'stock', 'url', 'image', 'seller'];
+                    foreach ($lowest_price_item as $key => $value) {
+                        if (in_array(strtolower($key), $non_attribute_keys) || empty($value)) continue;
+                        $taxonomy_key = strpos($key, 'pa_') !== 0 ? 'pa_' . sanitize_title($key) : $key;
+                        $term_name = is_array($value) ? ($value['label'] ?? $value['name']) : $value;
+                        $term = get_term_by('name', $term_name, $taxonomy_key);
+                        if ($term && !is_wp_error($term)) {
+                            $default_attributes[$taxonomy_key] = $term->slug;
+                        }
+                    }
+                    if (!empty($default_attributes)) {
+                        update_post_meta($pid, '_default_attributes', $default_attributes);
+                        $this->plugin->debug_log("Set default attributes for product #{$pid} using REAL term slugs.", $default_attributes);
+                    }
                 }
             }
-            if (!empty($default_attributes)) {
-                update_post_meta($pid, '_default_attributes', $default_attributes);
-                $this->plugin->debug_log("Set default attributes for product #{$pid} using REAL term slugs.", $default_attributes);
-            }
+            wc_delete_product_transients($pid);
         }
-    }
-    // ===================================================================
-    // +++ END: NEW LOGIC FOR SETTING DEFAULT VARIATION +++
-    // ===================================================================
 
-    wc_delete_product_transients($pid);
-}
-
-        /**
-         * ++++++++++ تابع حل کننده مشکل اصلی (نسخه اصلاح شده) ++++++++++
-         * این تابع ویژگی‌های والد را بر اساس داده‌های اسکرپ شده تنظیم می‌کند
-         * و با خواندن تنظیمات، نمایش یا عدم نمایش آنها را کنترل می‌کند.
-         */
         public function prepare_parent_attributes_stable($pid, $scraped_data) {
             $this->plugin->debug_log("Preparing parent attributes using STABLE method for product #{$pid}.");
 
@@ -348,7 +376,6 @@ if (!class_exists('WCPS_Core')) {
                 return;
             }
 
-            // --- Load all filtering and hiding rules ---
             $always_hide_keys = array_filter(array_map('trim', explode("\n", get_option('wcps_always_hide_keys', ''))));
             $conditional_rules = get_option('wcps_conditional_rules', []);
             $conditional_keys = !empty($conditional_rules) ? array_column($conditional_rules, 'key') : [];
@@ -370,18 +397,15 @@ if (!class_exists('WCPS_Core')) {
             foreach ($attribute_keys_cleaned as $index => $attr_key_clean) {
                 $taxonomy_name = 'pa_' . $attr_key_clean;
                 
-                // Ensure the global attribute exists
                 if (!taxonomy_exists($taxonomy_name)) {
                     wc_create_attribute(['name' => ucfirst(str_replace('-', ' ', $attr_key_clean)), 'slug' => $attr_key_clean]);
                     $this->plugin->debug_log("Created global attribute: {$taxonomy_name}");
                 }
 
-                // Create a new WC_Product_Attribute object
                 $attribute = new WC_Product_Attribute();
                 $attribute->set_id(wc_attribute_taxonomy_id_by_name($taxonomy_name));
                 $attribute->set_name($taxonomy_name);
 
-                // Get all terms for this attribute from the scraped data
                 $all_terms_for_this_attr = [];
                 foreach ($scraped_data as $item) {
                     foreach ($item as $key => $value) {
@@ -392,7 +416,6 @@ if (!class_exists('WCPS_Core')) {
                 }
                 $all_terms_for_this_attr = array_unique($all_terms_for_this_attr);
 
-                // Find or create terms and get their IDs
                 $term_ids = [];
                 foreach ($all_terms_for_this_attr as $term_name) {
                     $term = get_term_by('name', $term_name, $taxonomy_name);
@@ -405,25 +428,21 @@ if (!class_exists('WCPS_Core')) {
                 }
                 $attribute->set_options($term_ids);
                 
-                // +++ THE CORE FIX IS HERE (AGAIN, BUT MORE ROBUST) +++
                 $is_visible_for_user = !in_array($taxonomy_name, $managed_keys);
                 $attribute->set_visible($is_visible_for_user);
                 $attribute->set_variation(true);
                 
-                // کد دیباگ را اینجا اضافه کنید
                 $visibility_status = $is_visible_for_user ? 'Visible' : 'Hidden';
                 $this->plugin->debug_log("Attribute Check: '{$taxonomy_name}'. Should be {$visibility_status}.");
-                // پایان کد دیباگ
 
                 $attributes_array_for_product[] = $attribute;
             }
 
-            // Set attributes using the official WooCommerce method and SAVE
             $product->set_attributes($attributes_array_for_product);
             $product->save();
             
             $this->plugin->debug_log("Product attributes set via product object and saved for #{$pid}. This should clear caches.");
-            wc_delete_product_transients($pid); // An extra measure
+            wc_delete_product_transients($pid);
         }
 
         public function set_all_product_variations_outof_stock($pid) {
