@@ -147,10 +147,30 @@ if (!class_exists('WCPS_Core')) {
             // ===================================================================
             $this->plugin->debug_log("--- Starting Smart Pricing Logic for #{$pid} ---", 'SMART_PRICE');
             
-            // مرحله ۱: محاسبه قیمت استاندارد برای همه وریشن‌ها
-            $this->plugin->debug_log("Step 1: Calculating standard prices for all variations.", 'SMART_PRICE');
+            // مرحله ۱: استخراج قیمت ترب (قبل از هر محاسبه‌ای)
+            $this->plugin->debug_log("Step 1: Extracting Torob price.", 'SMART_PRICE');
+            $torob_price = 0;
+            $torob_raw_result = get_post_meta($pid, '_last_torob_scrape_raw_result', true);
+            if ($torob_raw_result) {
+                $torob_data = json_decode($torob_raw_result, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($torob_data)) {
+                    $source_key = get_post_meta($pid, '_torob_price_source', true) ?: 'mashhad';
+                    $message_key = $source_key === 'mashhad' ? 'OK (مشهد)' : 'OK (ایران)';
+                    
+                    foreach ($torob_data as $entry) {
+                        if (isset($entry['message']) && $entry['message'] === $message_key && isset($entry['data']['lowest_price'])) {
+                            $torob_price = (float) $entry['data']['lowest_price'];
+                            break;
+                        }
+                    }
+                }
+            }
+            $this->plugin->debug_log("Torob price extracted: {$torob_price}", 'SMART_PRICE');
+
+            // مرحله ۲: محاسبه قیمت استاندارد و پیدا کردن وریشن هدف
+            $this->plugin->debug_log("Step 2: Calculating standard prices and finding target variation.", 'SMART_PRICE');
             $adjustment_percent = (float) get_post_meta($pid, '_price_adjustment_percent', true);
-            $calculated_prices = []; // [variation_hash => ['base_price' => X, 'standard_price' => Y]]
+            $calculated_prices = [];
             $target_variation_hash = null;
             $min_standard_price = PHP_INT_MAX;
 
@@ -170,74 +190,61 @@ if (!class_exists('WCPS_Core')) {
                 $variation_hash = md5(json_encode($attr_data));
 
                 $base_price = isset($item['price']) ? (float) preg_replace('/[^0-9.]/', '', $item['price']) : 0;
-                $standard_price = $base_price * (1 + ($adjustment_percent / 100));
+                
+                // +++ شروع اصلاحیه اصلی +++
+                $current_adjustment = $adjustment_percent;
+                // اگر قیمت ترب معتبر است و قیمت پایه ما از آن بالاتر است، درصد سود مثبت را نادیده بگیر
+                if ($torob_price > 0 && $base_price > $torob_price && $adjustment_percent > 0) {
+                    $current_adjustment = 0;
+                    $this->plugin->debug_log("Adjustment override for hash {$variation_hash}: Base price {$base_price} > Torob price {$torob_price}. Ignoring positive adjustment.", 'SMART_PRICE_ADJUST');
+                }
+                $standard_price = $base_price * (1 + ($current_adjustment / 100));
+                // +++ پایان اصلاحیه اصلی +++
+
                 $calculated_prices[$variation_hash] = ['base_price' => $base_price, 'standard_price' => $standard_price];
 
-                // مرحله ۲: پیدا کردن ارزان‌ترین وریشن (وریشن هدف)
                 if ($standard_price > 0 && $standard_price < $min_standard_price) {
                     $min_standard_price = $standard_price;
                     $target_variation_hash = $variation_hash;
                 }
             }
-            $this->plugin->debug_log("Step 2: Target variation identified. Hash: {$target_variation_hash}, Min Standard Price: {$min_standard_price}", 'SMART_PRICE');
+            $this->plugin->debug_log("Step 2 Completed. Target variation hash: {$target_variation_hash}, Min Standard Price: {$min_standard_price}", 'SMART_PRICE');
 
-            // مرحله ۳: استخراج قیمت ترب
-            $this->plugin->debug_log("Step 3: Extracting Torob price.", 'SMART_PRICE');
-            $torob_price = 0;
-            $torob_raw_result = get_post_meta($pid, '_last_torob_scrape_raw_result', true);
-            if ($torob_raw_result) {
-                $torob_data = json_decode($torob_raw_result, true);
-                if (json_last_error() === JSON_ERROR_NONE && is_array($torob_data)) {
-                    $source_key = get_post_meta($pid, '_torob_price_source', true) ?: 'mashhad';
-                    $message_key = $source_key === 'mashhad' ? 'OK (مشهد)' : 'OK (ایران)';
-                    
-                    foreach ($torob_data as $entry) {
-                        if (isset($entry['message']) && $entry['message'] === $message_key && isset($entry['data']['lowest_price'])) {
-                            $torob_price = (float) $entry['data']['lowest_price'];
-                            break;
-                        }
-                    }
-                }
-            }
-            $this->plugin->debug_log("Torob price extracted: {$torob_price}", 'SMART_PRICE');
 
-            // مرحله ۴: اعمال منطق اصلی قیمت‌گذاری
-            $this->plugin->debug_log("Step 4: Applying main pricing logic.", 'SMART_PRICE');
-            $final_prices = []; // [variation_hash => final_price]
+            // مرحله ۳: اعمال منطق اصلی قیمت‌گذاری
+            $this->plugin->debug_log("Step 3: Applying main pricing logic.", 'SMART_PRICE');
+            $final_prices = [];
             
-            // اگر قیمت معتبر از ترب داشتیم و وریشن هدف مشخص بود
             if ($torob_price > 0 && $target_variation_hash !== null) {
                 $target_standard_price = $calculated_prices[$target_variation_hash]['standard_price'];
-                $new_target_price = $target_standard_price; // قیمت پیش‌فرض
+                $new_target_price = $target_standard_price;
 
-                // سناریو ۱: قیمت ما بالاتر از ترب است (تلاش برای کاهش قیمت)
+                // سناریو ۱: قیمت ما بالاتر از ترب است
                 if ($target_standard_price > $torob_price) {
                     $this->plugin->debug_log("Scenario 1: Our price is higher. Our: {$target_standard_price}, Torob: {$torob_price}", 'SMART_PRICE');
-                    $max_allowed_discount_price = $target_standard_price; // اگر درصد مثبت باشد، تخفیف مجاز نیست
+                    $max_allowed_discount_price = $target_standard_price;
                     if ($adjustment_percent < 0) {
                        $max_allowed_discount_price = $calculated_prices[$target_variation_hash]['base_price'] * (1 + ($adjustment_percent / 100));
                     }
                     $new_target_price = max($max_allowed_discount_price, $torob_price - 1000);
                     $this->plugin->debug_log("New target price (Scenario 1): {$new_target_price} (Based on Max Discount: {$max_allowed_discount_price})", 'SMART_PRICE');
 
-                // سناریو ۲: قیمت ما پایین‌تر از ترب است (تلاش برای افزایش سود)
+                // سناریو ۲: قیمت ما پایین‌تر از ترب است
                 } else {
                     $this->plugin->debug_log("Scenario 2: Our price is lower. Our: {$target_standard_price}, Torob: {$torob_price}", 'SMART_PRICE');
                     $new_target_price = $torob_price - 1000;
                     $this->plugin->debug_log("New target price (Scenario 2): {$new_target_price}", 'SMART_PRICE');
                 }
 
-                // محاسبه اختلاف قیمت برای تنظیم سایر وریشن‌ها
                 $price_diff = $new_target_price - $target_standard_price;
                 
-                // تنظیم قیمت نهایی برای همه وریشن‌ها بر اساس اختلاف
                 foreach ($calculated_prices as $hash => $prices) {
                     $final_prices[$hash] = $prices['standard_price'] + $price_diff;
                 }
                 $this->plugin->debug_log("Price difference calculated: {$price_diff}. All other variations adjusted accordingly.", 'SMART_PRICE');
 
             } else {
-                // سناریو ۳ و ۴: قیمت ترب نامعتبر یا لینک ترب موجود نیست. استفاده از قیمت استاندارد
+                // سناریو ۳ و ۴: قیمت ترب نامعتبر یا لینک ترب موجود نیست
                 $this->plugin->debug_log("Scenario 3/4: No valid Torob price or URL. Using standard prices.", 'SMART_PRICE');
                 foreach ($calculated_prices as $hash => $prices) {
                     $final_prices[$hash] = $prices['standard_price'];
@@ -281,7 +288,7 @@ if (!class_exists('WCPS_Core')) {
                 
                 $variation->set_attributes($attr_data);
                 
-                // مرحله ۵: ذخیره قیمت نهایی محاسبه شده
+                // مرحله ۴: ذخیره قیمت نهایی محاسبه شده
                 if (isset($final_prices[$variation_hash])) {
                     $price = round($final_prices[$variation_hash], 2);
                     $variation->set_price($price);
