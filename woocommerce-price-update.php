@@ -2,7 +2,7 @@
 /*
  * Plugin Name: WooCommerce Price Scraper
  * Description: اسکرپ قیمت محصولات از سایت مرجع، ساخت اتو واریشن‌ها، تنظیمات فیلتر گارانتی و دسته‌بندی استثنا
- * Version: 4.1 - Torob Integration
+ * Version: 4.3 - Scrape Type Support
  * Author: سج - SAJJ.IR
  * Text Domain: wc-price-scraper
  * Domain Path: /languages
@@ -10,7 +10,7 @@
 
 if (!defined('ABSPATH')) exit;
 
-define('WC_PRICE_SCRAPER_VERSION', '4.1');
+define('WC_PRICE_SCRAPER_VERSION', '4.3');
 define('WC_PRICE_SCRAPER_PATH', plugin_dir_path(__FILE__));
 define('WC_PRICE_SCRAPER_URL', plugin_dir_url(__FILE__));
 define('WC_PRICE_SCRAPER_API_ENDPOINT', 'http://45.156.185.161/scrape');
@@ -26,6 +26,7 @@ if (!class_exists('WC_Price_Scraper')) {
         public $admin;
         public $core;
         public $ajax_cron;
+        public $local_scraper; // NEW: Local scraper instance
 
         public static function instance() {
             if (!isset(self::$instance)) {
@@ -43,6 +44,9 @@ if (!class_exists('WC_Price_Scraper')) {
         }
 
         private function includes() {
+            // NEW: Include local scraper class FIRST
+            require_once WC_PRICE_SCRAPER_PATH . 'includes/class-wcps-local-scraper.php';
+            
             require_once WC_PRICE_SCRAPER_PATH . 'includes/class-wcps-admin.php';
             require_once WC_PRICE_SCRAPER_PATH . 'includes/class-wcps-core.php';
             require_once WC_PRICE_SCRAPER_PATH . 'includes/class-wcps-ajax-cron.php';
@@ -53,6 +57,9 @@ if (!class_exists('WC_Price_Scraper')) {
         }
         
         private function setup_classes() {
+            // NEW: Initialize local scraper FIRST
+            $this->local_scraper = new WCPS_Local_Scraper($this);
+            
             $this->core = new WCPS_Core($this);
             $this->admin = new WCPS_Admin($this);
             $this->ajax_cron = new WCPS_Ajax_Cron($this, $this->core);
@@ -82,57 +89,64 @@ if (!class_exists('WC_Price_Scraper')) {
             add_action('wp_ajax_wc_price_scraper_next_cron', [$this->ajax_cron, 'ajax_next_cron']);
             add_filter('cron_schedules', [$this->ajax_cron, 'add_cron_interval']);
             add_action('wc_price_scraper_cron_event', [$this->ajax_cron, 'cron_update_all_prices']);
+            add_action('wcps_priority_low_cron_event', [$this->ajax_cron, 'cron_update_priority_low']);
+            add_action('wcps_priority_medium_cron_event', [$this->ajax_cron, 'cron_update_priority_medium']);
+            add_action('wcps_priority_high_cron_event', [$this->ajax_cron, 'cron_update_priority_high']);
             register_activation_hook(__FILE__, [$this->ajax_cron, 'activate']);
             register_deactivation_hook(__FILE__, [$this->ajax_cron, 'deactivate']);
             add_action('update_option_wc_price_scraper_cron_interval', [$this->ajax_cron, 'handle_settings_save'], 10, 3);
-            add_action('update_option_wcps_high_frequency_pids', [$this->ajax_cron, 'handle_settings_save'], 10, 3);
-            add_action('update_option_wcps_high_frequency_interval', [$this->ajax_cron, 'handle_settings_save'], 10, 3);
+            // Removed: update_option hooks for high-frequency (feature deprecated)
+            add_action('update_option_wcps_priority_low_interval', [$this->ajax_cron, 'handle_settings_save'], 10, 3);
+            add_action('update_option_wcps_priority_medium_interval', [$this->ajax_cron, 'handle_settings_save'], 10, 3);
+            add_action('update_option_wcps_priority_high_interval', [$this->ajax_cron, 'handle_settings_save'], 10, 3);
+            add_action('update_option_wcps_global_scrape_status', [$this->ajax_cron, 'handle_settings_save'], 10, 3);
             add_action('wp_ajax_wcps_force_reschedule', [$this->ajax_cron, 'ajax_force_reschedule_callback']);
             add_action('wp_ajax_wcps_force_stop', [$this->ajax_cron, 'ajax_force_stop_all_crons']);
             add_action('wp_ajax_wcps_run_scrape_task', [$this->ajax_cron, 'run_scrape_task_handler']);
             add_action('wp_ajax_nopriv_wcps_run_scrape_task', [$this->ajax_cron, 'run_scrape_task_handler']);
             add_action('wcps_force_run_all_event', [$this->ajax_cron, 'cron_update_all_prices']);
+            add_action('wp_ajax_wcps_toggle_global_scrape', [$this->ajax_cron, 'ajax_toggle_global_scrape']);
 
             // --- N8N Retry AJAX & Cron ---
             add_action('wp_ajax_wcps_retry_n8n', [$this->ajax_cron, 'ajax_retry_failed_n8n_sends']);
             add_action('wcps_trigger_retry_n8n_event', [$this->ajax_cron, 'process_retry_n8n_sends']);
 
-            // High-Frequency Hooks
-            add_action('wcps_high_frequency_cron_event', [$this->ajax_cron, 'run_high_frequency_scrape']);
-            add_action('wp_ajax_wcps_force_hf_scrape', [$this->ajax_cron, 'ajax_force_high_frequency_scrape']);
+            // Removed: High-Frequency Hooks (feature deprecated)
+            
+            // New AJAX: Priority toggle
+            add_action('wp_ajax_wcps_toggle_priority_scrape', [$this->ajax_cron, 'ajax_toggle_priority_scrape']);
 
             add_action('wcps_scrape_single_product_task', [$this->ajax_cron, 'scrape_single_product_handler'], 10, 1);
 
             add_action('wp_ajax_wcps_clear_failed_log', [
                 $this->ajax_cron, 'ajax_clear_failed_log_callback'
             ]);
+// قلاب جدید برای نمایش تاریخ در صفحه محصول
+add_action('woocommerce_single_product_summary', [ $this, 'display_last_scraped_date_on_product_page' ], 11);
+}
 
-            // قلاب جدید برای نمایش تاریخ در صفحه محصول
-            add_action('woocommerce_single_product_summary', [ $this, 'display_last_scraped_date_on_product_page' ], 11);
-        }
+/**
+ * Displays the last scraped date on the single product page, below the price.
+ */
+public function display_last_scraped_date_on_product_page() {
+    global $product;
 
-        /**
-         * Displays the last scraped date on the single product page, below the price.
-         */
-        public function display_last_scraped_date_on_product_page() {
-            global $product;
+    // خواندن زمان آخرین اسکرپ از متادیتای محصول
+    $last_scraped_timestamp = get_post_meta($product->get_id(), '_last_scraped_time', true);
 
-            // خواندن زمان آخرین اسکرپ از متادیتای محصول
-            $last_scraped_timestamp = get_post_meta($product->get_id(), '_last_scraped_time', true);
+    // فقط در صورتی که تاریخ وجود داشته باشد، آن را نمایش بده
+    if ($last_scraped_timestamp) {
+        // تبدیل زمان به فرمت تاریخ زیبای فارسی (فقط تاریخ بدون ساعت)
+        $formatted_date = date_i18n('j F Y', $last_scraped_timestamp);
 
-            // فقط در صورتی که تاریخ وجود داشته باشد، آن را نمایش بده
-            if ($last_scraped_timestamp) {
-                // تبدیل زمان به فرمت تاریخ زیبای فارسی (مثال: ۷ تیر ۱۴۰۴)
-                $formatted_date = date_i18n('j F Y ساعت H:i', $last_scraped_timestamp);
+        // استفاده از کلاس CSS که شما مشخص کردید
+        $css_class = 'miland-warranty-badge';
+        $label = __('تاریخچه قیمت', 'wc-price-scraper');
 
-                // استفاده از کلاس CSS که شما مشخص کردید
-                $css_class = 'miland-warranty-badge';
-                $label = __('تاریخچه قیمت', 'wc-price-scraper');
-
-                // چاپ خروجی HTML
-                echo '<div class="' . esc_attr($css_class) . '" style="margin-top: 10px;">' . esc_html($label) . ': ' . esc_html($formatted_date) . '</div>';
-            }
-        }
+        // چاپ خروجی HTML
+        echo '<div class="' . esc_attr($css_class) . '" style="margin-top: 10px;">' . esc_html($label) . ': ' . esc_html($formatted_date) . '</div>';
+    }
+}
 
         // --- Utility Functions ---
         /**

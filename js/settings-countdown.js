@@ -109,7 +109,117 @@ jQuery(document).ready(function($) {
         }, 2000);
     });
 
-    // --- NEW: Conditional Rules Repeater Logic ---
+    // --- NEW: Global Scrape Toggle ---
+    $('#pause_global_scrape, #start_global_scrape').on('click', function(e) {
+        e.preventDefault();
+        
+        var button = $(this);
+        var statusSpan = $('#toggle_scrape_status');
+        var spinner = $('#toggle_scrape_spinner');
+        var statusDisplay = $('#global_status_display');
+
+        button.prop('disabled', true);
+        spinner.addClass('is-active').css('display', 'inline-block');
+        statusSpan.text('در حال بروزرسانی...').css('color', '');
+
+        $.ajax({
+            url: wc_scraper_settings_vars.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'wcps_toggle_global_scrape',
+                security: wc_scraper_settings_vars.toggle_scrape_nonce
+            },
+            success: function(response) {
+                if(response.success) {
+                    statusSpan.text(response.data.message).css('color', 'green');
+                    
+                    // Update status display
+                    var newStatus = response.data.new_status;
+                    var newStatusText = response.data.status_text;
+                    var newColor = (newStatus === 'active') ? 'green' : 'red';
+                    
+                    statusDisplay.text(newStatusText).css('color', newColor);
+                    
+                    // Update button
+                    if (newStatus === 'active') {
+                        button.replaceWith('<button type="button" class="button button-danger" id="pause_global_scrape">⏸ توقف اسکرپ عمومی</button>');
+                    } else {
+                        button.replaceWith('<button type="button" class="button button-primary" id="start_global_scrape">▶ شروع اسکرپ عمومی</button>');
+                    }
+                    
+                    // Re-bind event to new button
+                    $('#pause_global_scrape, #start_global_scrape').on('click', arguments.callee);
+                } else {
+                    statusSpan.text('خطا: ' + response.data.message).css('color', 'red');
+                    button.prop('disabled', false);
+                }
+            },
+            error: function() {
+                statusSpan.text('خطای ایجکس.').css('color', 'red');
+                button.prop('disabled', false);
+            },
+            complete: function() {
+                spinner.removeClass('is-active').hide();
+            }
+        });
+    });
+
+    // --- NEW: Priority Scrape Toggle ---
+    $('#pause_priority_scrape, #start_priority_scrape').on('click', function(e) {
+        e.preventDefault();
+        
+        var button = $(this);
+        var statusSpan = $('#priority_scrape_status');
+        var spinner = $('#priority_scrape_spinner');
+        var statusDisplay = $('#priority_status_display');
+
+        button.prop('disabled', true);
+        spinner.addClass('is-active').css('display', 'inline-block');
+        statusSpan.text('در حال بروزرسانی...').css('color', '');
+
+        $.ajax({
+            url: wc_scraper_settings_vars.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'wcps_toggle_priority_scrape',
+                security: wc_scraper_settings_vars.toggle_scrape_nonce
+            },
+            success: function(response) {
+                if(response.success) {
+                    statusSpan.text(response.data.message).css('color', 'green');
+                    
+                    // Update status display
+                    var newStatus = response.data.new_status;
+                    var newStatusText = response.data.status_text;
+                    var newColor = (newStatus === 'active') ? 'green' : 'red';
+                    
+                    statusDisplay.text(newStatusText).css('color', newColor);
+                    
+                    // Update button
+                    if (newStatus === 'active') {
+                        button.replaceWith('<button type="button" class="button button-danger" id="pause_priority_scrape">⏸ توقف اسکرپ اولویتی</button>');
+                    } else {
+                        button.replaceWith('<button type="button" class="button button-primary" id="start_priority_scrape">▶ شروع اسکرپ اولویتی</button>');
+                    }
+                    
+                    // Re-bind event to new button
+                    $('#pause_priority_scrape, #start_priority_scrape').on('click', arguments.callee);
+                } else {
+                    statusSpan.text('خطا: ' + response.data.message).css('color', 'red');
+                    button.prop('disabled', false);
+                }
+            },
+            error: function() {
+                statusSpan.text('خطای ایجکس.').css('color', 'red');
+                button.prop('disabled', false);
+            },
+            complete: function() {
+                spinner.removeClass('is-active').hide();
+            }
+        });
+    });
+
+    // --- Conditional Rules Repeater Logic ---
     function wcps_reindex_rules() {
         $('#wcps-rules-container .wcps-rule-row').each(function(index, row) {
             $(row).find('input').each(function() {
