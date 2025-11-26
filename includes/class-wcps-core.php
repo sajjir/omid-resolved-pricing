@@ -86,6 +86,25 @@ if (!class_exists('WCPS_Core')) {
                 return new WP_Error('invalid_data', __('داده‌های نامعتبر از API.', 'wc-price-scraper'));
             }
 
+            // ++ START: FIX for non-pa_ attributes (Attribute Normalization) ++
+            $processed_data = array();
+            foreach ($data as $row) {
+                $new_row = array();
+                foreach ($row as $key => $value) {
+                    // چک می‌کنیم که کلید، کلیدهای رزرو شده نباشد و با pa_ شروع نشود
+                    if (!in_array($key, array('price', 'stock', 'url', 'image', 'seller', 'sku')) && strpos($key, 'pa_') !== 0) {
+                        $new_key = 'pa_' . sanitize_title($key);
+                        $this->plugin->debug_log("Renaming attribute key '{$key}' to '{$new_key}'", 'ATTR_RENAME');
+                        $new_row[$new_key] = $value;
+                    } else {
+                        $new_row[$key] = $value;
+                    }
+                }
+                $processed_data[] = $new_row;
+            }
+            $data = $processed_data;
+            // -- END: FIX for non-pa_ attributes --
+
             // --- فیلترینگ پیشرفته ---
             $combined_rules = get_option('wcps_combined_rules', []);
             $filtered_data = $data;
