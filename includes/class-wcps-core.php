@@ -142,58 +142,83 @@ if (!class_exists('WCPS_Core')) {
             }
 
             $rounding_factor = (int) get_option('wcps_price_rounding_factor', 0);
-
             // انتخاب متغیر معتبر با کمترین قیمت
             $valid_variations = array_filter($filtered_data, function ($item) {
                 return isset($item['stock']) && $item['stock'] === 'موجود در انبار' && isset($item['price']) && is_numeric($item['price']);
             });
 
+            // ++ START MODIFICATION: Allow processing even if no in-stock variations found ++
+            $min_price = PHP_FLOAT_MAX;
+            $min_price_index = -1; // برای پیدا کردن index متغیری که min قیمت داره
+
             if (empty($valid_variations)) {
-                $this->set_all_product_variations_outof_stock($pid);
-                update_post_meta($pid, '_scraped_data', []);
-                $this->plugin->debug_log("No valid variations found, setting product #{$pid} to out of stock.");
-                return new WP_Error('no_variations', __('هیچ متغیری معتبر یافت نشد.', 'wc-price-scraper'));
-            }
+                $this->set_all_product_variations_outof_stock($pid); // ناموجود کردن والد
+                $this->plugin->debug_log("No IN-STOCK variations found. All variations will be processed/created as out-of-stock.");
 
-            // lowest_price از منبع (برای والد)
-            $prices = array_column($valid_variations, 'price');
-            $lowest_source_price = min(array_map('floatval', $prices));
+                // تنظیم قیمت مؤثر برای والد به صفر (محصول ناموجود)
+                $effective_price = 0;
+                
+            } else {
+                // lowest_price از منبع (برای والد)
+                $prices = array_column($valid_variations, 'price');
+                $lowest_source_price = min(array_map('floatval', $prices));
 
-            // محاسبه قیمت مؤثر برای والد با منطق جدید
-            $effective_price = $this->calculate_effective_price($lowest_source_price, $torob_price, $adjustment_type, $adjustment_value);
-            
-            // رند کردن اگر فعال باشه
-            if ($rounding_factor > 0) {
-                $effective_price = round($effective_price / $rounding_factor) * $rounding_factor;
+                // محاسبه قیمت مؤثر برای والد با منطق جدید
+                $effective_price = $this->calculate_effective_price($lowest_source_price, $torob_price, $adjustment_type, $adjustment_value);
+                
+                // رند کردن اگر فعال باشه
+                if ($rounding_factor > 0) {
+                    $effective_price = round($effective_price / $rounding_factor) * $rounding_factor;
+                }
             }
 
             // حالا برای هر متغیر: منطق مشابه اعمال کن (روی قیمت خودشون)
             $adjusted_variations_prices = [];
-            $adjusted_variations_data = $valid_variations; // برای نگهداری داده‌های تنظیم‌شده
-            $min_price_index = 0; // برای پیدا کردن min بعد
-            $min_price = PHP_FLOAT_MAX;
+            $adjusted_variations_data = $filtered_data; // **تغییر اساسی: پردازش تمام متغیرهای فیلترشده**
             
-            foreach ($valid_variations as $index => &$variation) {
+            // FIX: لوپ روی تمام متغیرهای فیلترشده (شامل موجود و ناموجود)
+            foreach ($filtered_data as $index => &$variation) { 
                 $var_price = (float) $variation['price'];
-                $adjusted_var_price = $this->calculate_effective_price($var_price, $torob_price, $adjustment_type, $adjustment_value);
+                
+                $is_instock = isset($variation['stock']) && $variation['stock'] === 'موجود در انبار';
+
+                $adjusted_var_price = $var_price;
+                
+                // محاسبه قیمت مؤثر فقط برای متغیرهای موجود
+                if ($is_instock) {
+                    $adjusted_var_price = $this->calculate_effective_price($var_price, $torob_price, $adjustment_type, $adjustment_value);
+                }
                 
                 if ($rounding_factor > 0) {
                     $adjusted_var_price = round($adjusted_var_price / $rounding_factor) * $rounding_factor;
                 }
                 
                 $variation['price'] = (string) $adjusted_var_price; // بروزرسانی قیمت متغیر
-                $adjusted_variations_prices[$index] = $adjusted_var_price;
-                $adjusted_variations_data[$index] = $variation; // ذخیره برای استفاده بعدی
                 
-                // پیدا کردن index متغیری که min قیمت داره
-                if ($adjusted_var_price < $min_price) {
-                    $min_price = $adjusted_var_price;
-                    $min_price_index = $index;
+                // فقط قیمت‌های موجود و مثبت برای تعیین min قیمت والد استفاده می‌شود
+                if ($is_instock && $adjusted_var_price > 0) {
+                    $adjusted_variations_prices[$index] = $adjusted_var_price;
+                    
+                    // پیدا کردن index متغیری که min قیمت داره
+                    if ($adjusted_var_price < $min_price) {
+                        $min_price = $adjusted_var_price;
+                        $min_price_index = $index;
+                    }
+                } else {
+                    // برای متغیرهای ناموجود، قیمت تنظیم شده نهایی در آرایه موقت صفر می‌شود
+                    $adjusted_variations_prices[$index] = 0;
                 }
+                
+                $adjusted_variations_data[$index] = $variation; // ذخیره برای استفاده بعدی
             }
 
-            // تنظیم قیمت والد به min همه متغیرها (اصل نهایی)
-            $effective_price = min($adjusted_variations_prices);
+            // تنظیم قیمت والد به min همه متغیرهای موجود (اصل نهایی)
+            if ($min_price_index !== -1) {
+                // اگر حداقل یک قیمت معتبر برای تعیین min پیدا شد، effective_price را به min تنظیم کن
+                $effective_price = $min_price; 
+            }
+            // ++ END MODIFICATION ++
+
             $this->plugin->debug_log("Scrape completed for product #{$pid}. Final default price: {$effective_price}");
 
             // ذخیره داده‌های فیلترشده و تنظیم‌شده
