@@ -313,10 +313,25 @@ if (!class_exists('WCPS_Core')) {
             }
 
             // حذف متغیرهای قدیمی
+            // --- تغییر استراتژی: سافت دیلیت (ناموجود کردن به جای حذف) ---
             foreach ($existing_variations_map as $key => $variation_id) {
-                if (!in_array($key, $scraped_keys) && get_post_meta($variation_id, '_wcps_is_protected', true) !== 'yes') {
-                    wp_delete_post($variation_id);
-                    $this->plugin->debug_log("Deleted outdated variation #{$variation_id} for product #{$pid}.");
+                // اگر واریشن در لیست جدید اسکرپ نبود
+                if (!in_array($key, $scraped_keys)) {
+                    
+                    // بررسی محافظت
+                    if (get_post_meta($variation_id, '_wcps_is_protected', true) === 'yes') {
+                        $this->plugin->debug_log("Variation #{$variation_id} is protected. Skipping soft-delete.");
+                        continue;
+                    }
+
+                    // به جای حذف، فقط ناموجودش می‌کنیم
+                    $variation = wc_get_product($variation_id);
+                    if ($variation) {
+                        $variation->set_stock_status('outofstock');
+                        // اختیاری: می‌توانید قیمت را هم صفر کنید یا دست نزنید. فعلاً فقط ناموجود می‌کنیم.
+                        $variation->save();
+                        $this->plugin->debug_log("Soft-Deleted (Set to OutOfStock) outdated variation #{$variation_id} for product #{$pid}.");
+                    }
                 }
             }
 
