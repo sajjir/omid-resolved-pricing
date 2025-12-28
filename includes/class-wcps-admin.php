@@ -229,7 +229,7 @@ public function render_outofstock_source_page() {
         /**
          * Adds custom fields to the 'General' tab of the WooCommerce product data meta box.
          */
-        public function add_scraper_fields() {
+      public function add_scraper_fields() {
             global $post;
             echo '<div class="options_group">';
 
@@ -256,9 +256,8 @@ public function render_outofstock_source_page() {
 
             // فیلد نشانه قیمت (برای اسکرپ محلی)
             $current_scrape_type = get_post_meta($post->ID, '_scrape_type', true) ?: 'api';
-            $display_style = ($current_scrape_type === 'local') ? '' : 'display: none;';
             
-            echo '<div class="form-field _local_scrape_fields' . ($current_scrape_type === 'local' ? '' : ' hidden') . '" id="_local_scrape_fields">';
+            echo '<div class="form-field _local_scrape_fields" id="_local_scrape_fields" style="' . ($current_scrape_type === 'local' ? '' : 'display: none;') . '">';
 
             echo '<p class="form-field" id="_price_selector_field">';
             echo '<label for="_price_selector">' . __('نشانه قیمت (قیمت فروش نهایی)', 'wc-price-scraper') . '</label>';
@@ -283,7 +282,7 @@ public function render_outofstock_source_page() {
             echo '<span class="description">' . __('اگر متن شامل این کلمات بود، محصول ناموجود در نظر گرفته می‌شود (با کاما جدا کنید).', 'wc-price-scraper') . '</span>';
             echo '</p>';
 
-            echo '</div>';},{
+            echo '</div>';
 
             // فیلد ترب
             woocommerce_wp_text_input([
@@ -293,12 +292,12 @@ public function render_outofstock_source_page() {
                 'description' => __('لینک صفحه محصول در سایت ترب را برای استعلام قیمت دوم وارد کنید.', 'wc-price-scraper')
             ]);
             
-           woocommerce_wp_checkbox([
-    'id'          => '_auto_sync_variations',
-    'label'       => __('همگام‌سازی خودکار', 'wc-price-scraper'),
-    'description' => __('با فعال بودن این گزینه، محصول در به‌روزرسانی‌های خودکار (کرون‌جاب) بررسی می‌شود.', 'wc-price-scraper'),
-    'value'       => get_post_meta($post->ID, '_auto_sync_variations', true) ?: 'yes' // اضافه کردن این خط
-]);
+            woocommerce_wp_checkbox([
+                'id'          => '_auto_sync_variations',
+                'label'       => __('همگام‌سازی خودکار', 'wc-price-scraper'),
+                'description' => __('با فعال بودن این گزینه، محصول در به‌روزرسانی‌های خودکار (کرون‌جاب) بررسی می‌شود.', 'wc-price-scraper'),
+                'value'       => get_post_meta($post->ID, '_auto_sync_variations', true) ?: 'yes'
+            ]);
 
             // دکمه رادیویی ترب
             woocommerce_wp_radio([
@@ -328,12 +327,9 @@ public function render_outofstock_source_page() {
                 'description' => __('تعیین اولویت به‌روزرسانی خودکار قیمت', 'wc-price-scraper')
             ]);
 
-            // +++ شروع کد جدید: سیستم تنظیم قیمت پیشرفته با ساختار درست +++
+            // سیستم تنظیم قیمت پیشرفته
             $adjustment_type = get_post_meta($post->ID, '_price_adjustment_type', true) ?: 'percent';
-            $percent_display = ($adjustment_type === 'percent') ? '' : 'display: none;';
-            $fixed_display = ($adjustment_type === 'fixed') ? '' : 'display: none;';
             
-            // استفاده از woocommerce_wp_radio برای ساختار استاندارد
             woocommerce_wp_radio([
                 'id'            => '_price_adjustment_type',
                 'label'         => __('نوع تنظیم قیمت', 'wc-price-scraper'),
@@ -347,19 +343,18 @@ public function render_outofstock_source_page() {
             ]);
 
             // فیلد درصدی
-            echo '<p class="form-field _price_adjustment_percent_field' . ($adjustment_type === 'percent' ? '' : ' hidden') . '" id="_price_adjustment_percent_field">';
+            echo '<p class="form-field _price_adjustment_percent_field" id="_price_adjustment_percent_field" style="' . ($adjustment_type === 'percent' ? '' : 'display: none;') . '">';
             echo '<label for="_price_adjustment_percent">' . __('مقدار تنظیم (درصد)', 'wc-price-scraper') . '</label>';
             echo '<input type="number" class="short" name="_price_adjustment_percent" id="_price_adjustment_percent" value="' . esc_attr(get_post_meta($post->ID, '_price_adjustment_percent', true)) . '" placeholder="0" step="any">';
             echo '<span class="description">' . __('مثال: 10 برای 10% افزایش یا -5 برای 5% کاهش', 'wc-price-scraper') . '</span>';
             echo '</p>';
 
             // فیلد مبلغ ثابت
-            echo '<p class="form-field _price_adjustment_fixed_field' . ($adjustment_type === 'fixed' ? '' : ' hidden') . '" id="_price_adjustment_fixed_field">';
+            echo '<p class="form-field _price_adjustment_fixed_field" id="_price_adjustment_fixed_field" style="' . ($adjustment_type === 'fixed' ? '' : 'display: none;') . '">';
             echo '<label for="_price_adjustment_fixed">' . __('مبلغ تنظیم (تومان)', 'wc-price-scraper') . '</label>';
             echo '<input type="number" class="short" name="_price_adjustment_fixed" id="_price_adjustment_fixed" value="' . esc_attr(get_post_meta($post->ID, '_price_adjustment_fixed', true)) . '" placeholder="0" step="any">';
             echo '<span class="description">' . __('مثال: 10000 برای ۱۰,۰۰۰ تومان افزایش یا -5000 برای ۵,۰۰۰ تومان کاهش', 'wc-price-scraper') . '</span>';
             echo '</p>';
-            // +++ پایان کد جدید +++
             
             echo '<p class="form-field scrape-controls">' .
                  '<button type="button" class="button button-primary" id="scrape_price">' . __('اسکرپ قیمت اکنون', 'wc-price-scraper') . '</button>' .
@@ -373,7 +368,6 @@ public function render_outofstock_source_page() {
                 $display_time = date_i18n(get_option('date_format') . ' @ ' . get_option('time_format'), $last_scraped_timestamp);
                 echo '<p class="form-field"><strong>' . __('آخرین اسکرپ موفق:', 'wc-price-scraper') . '</strong> ' . esc_html($display_time) . '</p>';
 
-                // نمایش نتیجه خام
                 $raw_result = get_post_meta($post->ID, '_last_scrape_raw_result', true);
                 if ($raw_result) {
                     echo '<strong>' . __('آخرین نتیجه خام دریافتی:', 'wc-price-scraper') . '</strong>';
@@ -388,35 +382,27 @@ public function render_outofstock_source_page() {
                 }
             }
             
-            // نمایش نتیجه خام ترب - بعد از باکس اصلی
             $torob_raw_result = get_post_meta($post->ID, '_last_torob_scrape_raw_result', true);
             if ($torob_raw_result) {
                 echo '<div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd;">';
                 echo '<strong>' . __('آخرین نتیجه خام دریافتی ترب:', 'wc-price-scraper') . '</strong>';
                 echo '<pre style="direction: ltr; text-align: left; background-color: #f5f5f5; border: 1px solid #ccc; padding: 10px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; max-height: 200px; overflow-y: auto; margin-top: 10px;">';
-                
-                // بررسی کن آیا داده JSON هست یا خطا
                 if (strpos($torob_raw_result, 'Torob Error') === 0 || strpos($torob_raw_result, 'INVALID_STRUCTURE') === 0) {
-                    // خطای متنی
                     echo esc_html($torob_raw_result);
                 } else {
-                    // سعی کن JSON رو decode کن
                     $torob_json_data = json_decode($torob_raw_result);
                     if (json_last_error() === JSON_ERROR_NONE) {
                         echo esc_html(json_encode($torob_json_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
                     } else {
-                        // اگر JSON نیست، خام نمایش بده
                         echo esc_html($torob_raw_result);
                     }
                 }
-                
                 echo '</pre>';
                 echo '</div>';
             }
 
             echo '</div>';
             
-            // +++ شروع کد جدید: JS برای نمایش پویا فیلدها +++
             echo '<script type="text/javascript">
             jQuery(document).ready(function($) {
                 function toggleScrapeFields() {
@@ -439,24 +425,19 @@ public function render_outofstock_source_page() {
                     }
                 }
                 
-                // اجرای اولیه
                 toggleScrapeFields();
                 toggleAdjustmentFields();
                 
-                // تغییر موقع انتخاب نوع اسکرپ
                 $("#_scrape_type").change(function() {
                     toggleScrapeFields();
                 });
                 
-                // تغییر موقع انتخاب نوع تنظیم قیمت
                 $("input[name=\'_price_adjustment_type\']").change(function() {
                     toggleAdjustmentFields();
                 });
             });
             </script>';
-            // +++ پایان کد جدید +++
         }
-
         /**
          * Saves the custom scraper fields when a product is saved.
          */
