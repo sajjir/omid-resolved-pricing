@@ -31,44 +31,50 @@ if (!class_exists('WCPS_Admin')) {
         
         }
 
-        /**
-         * Adds the plugin's settings page to the WordPress admin menu.
-         */
-        public function add_settings_page() {
-            // Top-level menu: اسکرپر قیمت
-            add_menu_page(
-                __('اسکرپر قیمت', 'wc-price-scraper'),
-                __('اسکرپر قیمت', 'wc-price-scraper'),
-                'manage_options',
-                'wcps-scraper',
-                [$this, 'render_settings_page'],
-                'dashicons-money',
-                56
-            );
+       // این کد را جایگزین متد add_settings_page فعلی کنید یا خط جدید را به آن اضافه نمایید:
 
-            // +++ حذف منوی تکراری "تنظیمات کلی اسکرپر" +++
-            // منوی اصلی (wcps-scraper) خودش تنظیمات کلی رو نشون میده
+public function add_settings_page() {
+    // Top-level menu: اسکرپر قیمت
+    add_menu_page(
+        __('اسکرپر قیمت', 'wc-price-scraper'),
+        __('اسکرپر قیمت', 'wc-price-scraper'),
+        'manage_options',
+        'wcps-scraper',
+        [$this, 'render_settings_page'],
+        'dashicons-money',
+        56
+    );
 
-            // Submenu: محصولات محافظ شده
-            add_submenu_page(
-                'wcps-scraper',
-                __('محصولات محافظت‌شده', 'wc-price-scraper'),
-                __('محصولات محافظت‌شده', 'wc-price-scraper'),
-                'manage_options',
-                'wcps-protected-products',
-                [$this, 'render_protected_products_page']
-            );
+    // Submenu: محصولات محافظ شده
+    add_submenu_page(
+        'wcps-scraper',
+        __('محصولات محافظت‌شده', 'wc-price-scraper'),
+        __('محصولات محافظت‌شده', 'wc-price-scraper'),
+        'manage_options',
+        'wcps-protected-products',
+        [$this, 'render_protected_products_page']
+    );
 
-            // Submenu: محصولات رقابتی در ترب
-            add_submenu_page(
-                'wcps-scraper',
-                __('محصولات رقابتی در ترب', 'wc-price-scraper'),
-                __('محصولات رقابتی در ترب', 'wc-price-scraper'),
-                'manage_options',
-                'wcps-torob-products',
-                [$this, 'render_torob_products_page']
-            );
-        }
+    // Submenu: محصولات رقابتی در ترب
+    add_submenu_page(
+        'wcps-scraper',
+        __('محصولات رقابتی در ترب', 'wc-price-scraper'),
+        __('محصولات رقابتی در ترب', 'wc-price-scraper'),
+        'manage_options',
+        'wcps-torob-products',
+        [$this, 'render_torob_products_page']
+    );
+
+    // +++ بخش جدید: محصولات دارای کسری در منبع +++
+    add_submenu_page(
+        'wcps-scraper',
+        __('ناموجود در منبع', 'wc-price-scraper'), // عنوان منو
+        __('ناموجود در منبع', 'wc-price-scraper'),
+        'manage_options',
+        'wcps-outofstock-source',
+        [$this, 'render_outofstock_source_page']
+    );
+}
 
         /**
          * Registers all settings for the plugin.
@@ -138,7 +144,9 @@ if (!class_exists('WCPS_Admin')) {
         public function sanitize_category_ids($input) {
             return is_array($input) ? array_map('absint', $input) : [];
         }
-
+public function render_outofstock_source_page() {
+    require_once WC_PRICE_SCRAPER_PATH . 'views/admin-outofstock-source.php';
+}
         /**
          * Sanitizes a checkbox value to either 'yes' or 'no'.
          * @param string $input The input from the checkbox.
