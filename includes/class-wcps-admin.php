@@ -31,44 +31,50 @@ if (!class_exists('WCPS_Admin')) {
         
         }
 
-        /**
-         * Adds the plugin's settings page to the WordPress admin menu.
-         */
-        public function add_settings_page() {
-            // Top-level menu: اسکرپر قیمت
-            add_menu_page(
-                __('اسکرپر قیمت', 'wc-price-scraper'),
-                __('اسکرپر قیمت', 'wc-price-scraper'),
-                'manage_options',
-                'wcps-scraper',
-                [$this, 'render_settings_page'],
-                'dashicons-money',
-                56
-            );
+       // این کد را جایگزین متد add_settings_page فعلی کنید یا خط جدید را به آن اضافه نمایید:
 
-            // +++ حذف منوی تکراری "تنظیمات کلی اسکرپر" +++
-            // منوی اصلی (wcps-scraper) خودش تنظیمات کلی رو نشون میده
+public function add_settings_page() {
+    // Top-level menu: اسکرپر قیمت
+    add_menu_page(
+        __('اسکرپر قیمت', 'wc-price-scraper'),
+        __('اسکرپر قیمت', 'wc-price-scraper'),
+        'manage_options',
+        'wcps-scraper',
+        [$this, 'render_settings_page'],
+        'dashicons-money',
+        56
+    );
 
-            // Submenu: محصولات محافظ شده
-            add_submenu_page(
-                'wcps-scraper',
-                __('محصولات محافظت‌شده', 'wc-price-scraper'),
-                __('محصولات محافظت‌شده', 'wc-price-scraper'),
-                'manage_options',
-                'wcps-protected-products',
-                [$this, 'render_protected_products_page']
-            );
+    // Submenu: محصولات محافظ شده
+    add_submenu_page(
+        'wcps-scraper',
+        __('محصولات محافظت‌شده', 'wc-price-scraper'),
+        __('محصولات محافظت‌شده', 'wc-price-scraper'),
+        'manage_options',
+        'wcps-protected-products',
+        [$this, 'render_protected_products_page']
+    );
 
-            // Submenu: محصولات رقابتی در ترب
-            add_submenu_page(
-                'wcps-scraper',
-                __('محصولات رقابتی در ترب', 'wc-price-scraper'),
-                __('محصولات رقابتی در ترب', 'wc-price-scraper'),
-                'manage_options',
-                'wcps-torob-products',
-                [$this, 'render_torob_products_page']
-            );
-        }
+    // Submenu: محصولات رقابتی در ترب
+    add_submenu_page(
+        'wcps-scraper',
+        __('محصولات رقابتی در ترب', 'wc-price-scraper'),
+        __('محصولات رقابتی در ترب', 'wc-price-scraper'),
+        'manage_options',
+        'wcps-torob-products',
+        [$this, 'render_torob_products_page']
+    );
+
+    // +++ بخش جدید: محصولات دارای کسری در منبع +++
+    add_submenu_page(
+        'wcps-scraper',
+        __('ناموجود در منبع', 'wc-price-scraper'), // عنوان منو
+        __('ناموجود در منبع', 'wc-price-scraper'),
+        'manage_options',
+        'wcps-outofstock-source',
+        [$this, 'render_outofstock_source_page']
+    );
+}
 
         /**
          * Registers all settings for the plugin.
@@ -138,7 +144,9 @@ if (!class_exists('WCPS_Admin')) {
         public function sanitize_category_ids($input) {
             return is_array($input) ? array_map('absint', $input) : [];
         }
-
+public function render_outofstock_source_page() {
+    require_once WC_PRICE_SCRAPER_PATH . 'views/admin-outofstock-source.php';
+}
         /**
          * Sanitizes a checkbox value to either 'yes' or 'no'.
          * @param string $input The input from the checkbox.
@@ -250,11 +258,32 @@ if (!class_exists('WCPS_Admin')) {
             $current_scrape_type = get_post_meta($post->ID, '_scrape_type', true) ?: 'api';
             $display_style = ($current_scrape_type === 'local') ? '' : 'display: none;';
             
-            echo '<p class="form-field _price_selector_field' . ($current_scrape_type === 'local' ? '' : ' hidden') . '" id="_price_selector_field">';
-            echo '<label for="_price_selector">' . __('نشانه قیمت', 'wc-price-scraper') . '</label>';
-            echo '<input type="text" class="short" style="" name="_price_selector" id="_price_selector" value="' . esc_attr(get_post_meta($post->ID, '_price_selector', true)) . '" placeholder=".price یا //span[@class=\'price\']">';
-            echo '<span class="description">' . __('CSS Selector یا XPath عنصر قیمت در صفحه منبع', 'wc-price-scraper') . '</span>';
+            echo '<div class="form-field _local_scrape_fields' . ($current_scrape_type === 'local' ? '' : ' hidden') . '" id="_local_scrape_fields">';
+
+            echo '<p class="form-field" id="_price_selector_field">';
+            echo '<label for="_price_selector">' . __('نشانه قیمت (قیمت فروش نهایی)', 'wc-price-scraper') . '</label>';
+            echo '<input type="text" class="short" name="_price_selector" id="_price_selector" value="' . esc_attr(get_post_meta($post->ID, '_price_selector', true)) . '" placeholder=".price یا //span[@class=\'price\']">';
+            echo '<span class="description">' . __('CSS Selector یا XPath عنصر قیمت در صفحه منبع (قیمت نهایی / فروش)', 'wc-price-scraper') . '</span>';
             echo '</p>';
+
+            echo '<p class="form-field" id="_regular_price_selector_field">';
+            echo '<label for="_regular_price_selector">' . __('نشانه قیمت اصلی (خط‌خورده)', 'wc-price-scraper') . '</label>';
+            echo '<input type="text" class="short" name="_regular_price_selector" id="_regular_price_selector" value="' . esc_attr(get_post_meta($post->ID, '_regular_price_selector', true)) . '" placeholder="del .amount یا .regular-price">';
+            echo '<span class="description">' . __('اختیاری. اگر پیدا شود، محصول تخفیف‌دار می‌شود.', 'wc-price-scraper') . '</span>';
+            echo '</p>';
+
+            echo '<p class="form-field" id="_stock_status_selector_field">';
+            echo '<label for="_stock_status_selector">' . __('نشانه وضعیت موجودی', 'wc-price-scraper') . '</label>';
+            echo '<input type="text" class="short" name="_stock_status_selector" id="_stock_status_selector" value="' . esc_attr(get_post_meta($post->ID, '_stock_status_selector', true)) . '" placeholder=".stock-status یا .availability">';
+            echo '</p>';
+
+            echo '<p class="form-field" id="_outofstock_keywords_field">';
+            echo '<label for="_outofstock_keywords">' . __('کلمات کلیدی "ناموجود"', 'wc-price-scraper') . '</label>';
+            echo '<input type="text" class="short" name="_outofstock_keywords" id="_outofstock_keywords" value="' . esc_attr(get_post_meta($post->ID, '_outofstock_keywords', true)) . '" placeholder="ناموجود, تماس بگیرید, توقف تولید">';
+            echo '<span class="description">' . __('اگر متن شامل این کلمات بود، محصول ناموجود در نظر گرفته می‌شود (با کاما جدا کنید).', 'wc-price-scraper') . '</span>';
+            echo '</p>';
+
+            echo '</div>';},{
 
             // فیلد ترب
             woocommerce_wp_text_input([
@@ -393,9 +422,9 @@ if (!class_exists('WCPS_Admin')) {
                 function toggleScrapeFields() {
                     var scrapeType = $("#_scrape_type").val();
                     if (scrapeType === "local") {
-                        $("#_price_selector_field").show();
+                        $("#_price_selector_field, #_regular_price_selector_field, #_stock_status_selector_field, #_outofstock_keywords_field").show();
                     } else {
-                        $("#_price_selector_field").hide();
+                        $("#_price_selector_field, #_regular_price_selector_field, #_stock_status_selector_field, #_outofstock_keywords_field").hide();
                     }
                 }
                 
@@ -442,9 +471,18 @@ if (!class_exists('WCPS_Admin')) {
                 update_post_meta($post_id, '_source_url', esc_url_raw($_POST['_source_url']));
             }
 
-            // +++ شروع کد جدید: ذخیره نشانه قیمت +++
+            // +++ شروع کد جدید: ذخیره نشانه قیمت و تنظیمات اسکرپ محلی +++
             if (isset($_POST['_price_selector'])) {
                 update_post_meta($post_id, '_price_selector', sanitize_text_field($_POST['_price_selector']));
+            }
+            if (isset($_POST['_regular_price_selector'])) {
+                update_post_meta($post_id, '_regular_price_selector', sanitize_text_field($_POST['_regular_price_selector']));
+            }
+            if (isset($_POST['_stock_status_selector'])) {
+                update_post_meta($post_id, '_stock_status_selector', sanitize_text_field($_POST['_stock_status_selector']));
+            }
+            if (isset($_POST['_outofstock_keywords'])) {
+                update_post_meta($post_id, '_outofstock_keywords', sanitize_text_field($_POST['_outofstock_keywords']));
             }
             // +++ پایان کد جدید +++
 
