@@ -413,124 +413,99 @@ if (!class_exists('WCPS_Core')) {
             return $effective_price;
         }
 
-        /**
-         * Process local scraping (new functionality) with Torob integration
-         */
         private function process_local_scrape($pid, $url) {
-            $this->plugin->debug_log("Processing LOCAL scrape for product #{$pid}", 'LOCAL_SCRAPE_START');
-            
-            // Get price selector
-            $price_selector = get_post_meta($pid, '_price_selector', true);
-            if (empty($price_selector)) {
-                $error_msg = __('نشانه قیمت برای اسکرپ محلی تنظیم نشده است.', 'wc-price-scraper');
-                $this->plugin->debug_log($error_msg, 'LOCAL_SCRAPE_ERROR');
-                return new WP_Error('missing_selector', $error_msg);
-            }
-            
-            $this->plugin->debug_log("Using price selector: {$price_selector}", 'LOCAL_SCRAPE_SELECTOR');
-            
-            // --- استعلام از ترب (کد جدید) ---
-            $torob_url = get_post_meta($pid, '_torob_url', true);
-            $torob_price = null;
-            if (!empty($torob_url)) {
-                $this->plugin->debug_log("Torob URL found for product #{$pid}. Starting Torob scrape.", 'TOROB_SCRAPE');
-                $torob_price_source_key = get_post_meta($pid, '_torob_price_source', true) ?: 'mashhad';
-                $api_suffix = $torob_price_source_key === 'mashhad' ? '/!mashhad!/' : '/';
-                $torob_api_url = 'http://sajjcrapapi.qolamai.ir/sajjcrape?key=UXckq6pvj7&url=' . urlencode($torob_url . $api_suffix);
+            // 1. دریافت تنظیمات کامل اسکرپ محلی
+            $config = [
+                'price_selector'         => get_post_meta($pid, '_price_selector', true),
+                'regular_price_selector' => get_post_meta($pid, '_regular_price_selector', true),
+                'stock_status_selector'  => get_post_meta($pid, '_stock_status_selector', true),
+                'outofstock_keywords'    => get_post_meta($pid, '_outofstock_keywords', true),
+            ];
 
-                $raw_torob_data = $this->plugin->make_torob_api_call($torob_api_url);
+            if (empty($config['price_selector'])) {
+                return new WP_Error('missing_selector', __('سلکتور قیمت برای اسکرپ محلی تنظیم نشده است.', 'wc-price-scraper'));
+            }
 
-                if (is_wp_error($raw_torob_data)) {
-                    $error_message = 'Torob Error: ' . $raw_torob_data->get_error_message();
-                    update_post_meta($pid, '_last_torob_scrape_raw_result', $error_message);
-                    $this->plugin->debug_log($error_message, 'TOROB_ERROR');
-                } else {
-                    update_post_meta($pid, '_last_torob_scrape_raw_result', $raw_torob_data);
-                    $torob_data = json_decode($raw_torob_data, true);
-                    
-                    // +++ اصلاح این بخش +++
-                    if (is_array($torob_data) && !empty($torob_data)) {
-                        // پیدا کردن آیتم بر اساس منطقه انتخاب شده
-                        foreach ($torob_data as $torob_item) {
-                            if (isset($torob_item['success']) && $torob_item['success'] && 
-                                isset($torob_item['message']) && 
-                                isset($torob_item['data']['lowest_price']) && 
-                                $torob_item['data']['lowest_price'] > 0) {
-                                
-                                // چک کردن منطقه بر اساس تنظیمات محصول
-                                $is_correct_region = false;
-                                if ($torob_price_source_key === 'mashhad' && strpos($torob_item['message'], 'مشهد') !== false) {
-                                    $is_correct_region = true;
-                                } elseif ($torob_price_source_key === 'iran' && strpos($torob_item['message'], 'ایران') !== false) {
-                                    $is_correct_region = true;
-                                }
-                                
-                                if ($is_correct_region) {
-                                    $torob_price = (float) $torob_item['data']['lowest_price'];
-                                    $this->plugin->debug_log("Torob {$torob_price_source_key} price found: {$torob_price}", 'TOROB_SUCCESS');
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if ($torob_price === null) {
-                            $this->plugin->debug_log("No valid Torob price found for region: {$torob_price_source_key}", 'TOROB_ERROR');
-                        }
-                    } else {
-                        $this->plugin->debug_log("Invalid Torob data structure", 'TOROB_ERROR');
-                    }
-                }
-            } else {
-                delete_post_meta($pid, '_last_torob_scrape_raw_result');
+            require_once WC_PRICE_SCRAPER_PATH . 'includes/class-wcps-local-scraper.php';
+            $scraper = new WCPS_Local_Scraper();
+            $result = $scraper->scrape_product($url, $config);
+
+            if (is_wp_error($result)) {
+                return $result;
             }
+
+            // نتیجه: آرایه‌ای شامل regular_price, sale_price, stock_status
             
-            // Use local scraper
-            if (isset($this->plugin->local_scraper)) {
-                $scraped_price = $this->plugin->local_scraper->scrape_price($url, $price_selector);
-                
-                if (is_wp_error($scraped_price)) {
-                    return $scraped_price;
-                }
-                
-                // حالا با قیمت ترب ادغام کن (کد جدید)
-                return $this->apply_price_adjustment_with_torob($pid, $scraped_price, $torob_price, true);
+            // 2. اعمال تغییرات روی محصول
+            $product = wc_get_product($pid);
+            if (!$product) return;
+
+            // الف) تنظیم موجودی
+            $product->set_stock_status($result['stock_status']);
+
+            // ب) تنظیم قیمت‌ها (فقط اگر موجود باشد یا کاربر بخواهد قیمت ناموجود هم آپدیت شود)
+            // معمولاً قیمت را آپدیت می‌کنیم
+            
+            $regular_price = $result['regular_price'];
+            $sale_price    = $result['sale_price'];
+
+            // ** اعمال قوانین قیمت‌گذاری (درصد/مبلغ ثابت) روی قیمت نهایی **
+            // توجه: قوانین شما معمولاً روی "قیمت خرید" اعمال می‌شود.
+            // اینجا فرض می‌کنیم قیمتی که اسکرپ شده، قیمت مرجع است.
+            
+            // دریافت تنظیمات تعدیل قیمت کاربر
+            $adjustment_type = get_post_meta($pid, '_price_adjustment_type', true);
+            if ($adjustment_type === 'percent') {
+                $adjustment_value = (float) get_post_meta($pid, '_price_adjustment_percent', true);
             } else {
-                $error_msg = __('کلاس اسکرپ محلی در دسترس نیست.', 'wc-price-scraper');
-                $this->plugin->debug_log($error_msg, 'LOCAL_SCRAPE_ERROR');
-                return new WP_Error('local_scraper_not_found', $error_msg);
+                $adjustment_value = (float) get_post_meta($pid, '_price_adjustment_fixed', true);
             }
+
+            // تابع کمکی محاسبه قیمت
+            // اگر تخفیف دارد، باید روی هر دو اعمال شود یا فقط قیمت فروش؟ معمولاً روی هر دو.
+            
+            if ($regular_price > 0) {
+                // اعمال تعدیل روی قیمت اصلی
+                $final_regular = $this->apply_price_adjustment($regular_price, $adjustment_type, $adjustment_value);
+                $product->set_regular_price($final_regular);
+            }
+
+            if ($sale_price > 0) {
+                // اعمال تعدیل روی قیمت حراج
+                $final_sale = $this->apply_price_adjustment($sale_price, $adjustment_type, $adjustment_value);
+                $product->set_sale_price($final_sale);
+                $product->set_price($final_sale);
+            } else {
+                // اگر حراج ندارد، قیمت نهایی همان قیمت اصلی است
+                $product->set_sale_price('');
+                if (isset($final_regular)) {
+                    $product->set_price($final_regular);
+                }
+            }
+
+            // ذخیره محصول
+            $product->save();
+            
+            // ذخیره لاگ و زمان
+            update_post_meta($pid, '_last_scraped_time', current_time('mysql'));
+            update_post_meta($pid, '_last_scrape_status', 'success');
+            
+            // لاگ دیباگ
+            $this->plugin->debug_log("Local Scrape Success for #{$pid}. Regular: {$regular_price} -> Final: " . ($final_regular ?? 'N/A') . ". Stock: {$result['stock_status']}");
+
+            return true;
         }
 
-        /**
-         * NEW: Apply price adjustment based on type (percent or fixed)
-         */
-        private function apply_price_adjustment($product_id, $scraped_price, $is_local = false) {
-            $this->plugin->debug_log("Applying price adjustment for product #{$product_id}. Scraped price: {$scraped_price}", 'PRICE_ADJUSTMENT');
-            
-            $adjustment_type = get_post_meta($product_id, '_price_adjustment_type', true) ?: 'percent';
-            $final_price = $scraped_price;
-            
-            // Apply adjustment based on type
-            if ($adjustment_type === 'percent') {
-                $adjustment_value = (float) get_post_meta($product_id, '_price_adjustment_percent', true) ?: 0;
-                $final_price = $scraped_price * (1 + ($adjustment_value / 100));
-                $this->plugin->debug_log("Applied percent adjustment: {$adjustment_value}%. Result: {$final_price}", 'PRICE_ADJUSTMENT');
-            } else {
-                $adjustment_value = (float) get_post_meta($product_id, '_price_adjustment_fixed', true) ?: 0;
-                $final_price = $scraped_price + $adjustment_value;
-                $this->plugin->debug_log("Applied fixed adjustment: {$adjustment_value} Tomans. Result: {$final_price}", 'PRICE_ADJUSTMENT');
+        // یک تابع کمکی کوچک برای اعمال درصد/مبلغ ثابت (اگر در کلاس ندارید اضافه کنید)
+        private function apply_price_adjustment($price, $type, $value) {
+            if (($type === 'percentage' || $type === 'percent') && $value != 0) {
+                return $price + ($price * ($value / 100));
+            } elseif ($type === 'fixed' && $value != 0) {
+                return $price + $value;
             }
-            
-            // Apply rounding
-            $rounding_factor = (int) get_option('wcps_price_rounding_factor', 0);
-            if ($rounding_factor > 0) {
-                $final_price = round($final_price / $rounding_factor) * $rounding_factor;
-                $this->plugin->debug_log("Applied rounding: {$rounding_factor}. Final price: {$final_price}", 'PRICE_ADJUSTMENT');
-            }
-            
-            // Get product
-            $product = wc_get_product($product_id);
-            if (!$product) {
+            return $price;
+        }
+
                 return new WP_Error('product_not_found', __('محصول یافت نشد.', 'wc-price-scraper'));
             }
             
