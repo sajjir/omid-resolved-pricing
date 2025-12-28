@@ -434,64 +434,56 @@ if (!class_exists('WCPS_Core')) {
                 return $result;
             }
 
-            // نتیجه: آرایه‌ای شامل regular_price, sale_price, stock_status
-            
             // 2. اعمال تغییرات روی محصول
             $product = wc_get_product($pid);
             if (!$product) return;
 
+            // +++ منطق جدید: تبدیل محصول متغیر به ساده در اسکرپ محلی +++
+            if ($product->is_type('variable')) {
+                $this->convert_to_simple_product($pid);
+                // بارگذاری مجدد محصول به عنوان محصول ساده
+                $product = wc_get_product($pid);
+            }
+            // +++ پایان منطق جدید +++
+
             // الف) تنظیم موجودی
             $product->set_stock_status($result['stock_status']);
 
-            // ب) تنظیم قیمت‌ها (فقط اگر موجود باشد یا کاربر بخواهد قیمت ناموجود هم آپدیت شود)
-            // معمولاً قیمت را آپدیت می‌کنیم
-            
+            // ب) تنظیم قیمت‌ها
             $regular_price = $result['regular_price'];
             $sale_price    = $result['sale_price'];
-
-            // ** اعمال قوانین قیمت‌گذاری (درصد/مبلغ ثابت) روی قیمت نهایی **
-            // توجه: قوانین شما معمولاً روی "قیمت خرید" اعمال می‌شود.
-            // اینجا فرض می‌کنیم قیمتی که اسکرپ شده، قیمت مرجع است.
             
             // دریافت تنظیمات تعدیل قیمت کاربر
             $adjustment_type = get_post_meta($pid, '_price_adjustment_type', true);
+            $adjustment_value = 0;
             if ($adjustment_type === 'percent') {
                 $adjustment_value = (float) get_post_meta($pid, '_price_adjustment_percent', true);
             } else {
                 $adjustment_value = (float) get_post_meta($pid, '_price_adjustment_fixed', true);
             }
 
-            // تابع کمکی محاسبه قیمت
-            // اگر تخفیف دارد، باید روی هر دو اعمال شود یا فقط قیمت فروش؟ معمولاً روی هر دو.
-            
             if ($regular_price > 0) {
-                // اعمال تعدیل روی قیمت اصلی
                 $final_regular = $this->apply_price_adjustment($regular_price, $adjustment_type, $adjustment_value);
                 $product->set_regular_price($final_regular);
             }
 
             if ($sale_price > 0) {
-                // اعمال تعدیل روی قیمت حراج
                 $final_sale = $this->apply_price_adjustment($sale_price, $adjustment_type, $adjustment_value);
                 $product->set_sale_price($final_sale);
                 $product->set_price($final_sale);
             } else {
-                // اگر حراج ندارد، قیمت نهایی همان قیمت اصلی است
                 $product->set_sale_price('');
                 if (isset($final_regular)) {
                     $product->set_price($final_regular);
                 }
             }
 
-            // ذخیره محصول
             $product->save();
             
-            // ذخیره لاگ و زمان
             update_post_meta($pid, '_last_scraped_time', current_time('mysql'));
             update_post_meta($pid, '_last_scrape_status', 'success');
             
-            // لاگ دیباگ
-            $this->plugin->debug_log("Local Scrape Success for #{$pid}. Regular: {$regular_price} -> Final: " . ($final_regular ?? 'N/A') . ". Stock: {$result['stock_status']}");
+            $this->plugin->debug_log("Local Scrape Success for #{$pid}. Stock: {$result['stock_status']}");
 
             return true;
         }
@@ -506,36 +498,6 @@ if (!class_exists('WCPS_Core')) {
             return $price;
         }
 
-                return new WP_Error('product_not_found', __('محصول یافت نشد.', 'wc-price-scraper'));
-            }
-            
-            // For local scraping, convert to simple product if it's variable
-            if ($is_local && $product->is_type('variable')) {
-                $this->convert_to_simple_product($product_id);
-                $product = wc_get_product($product_id);
-            }
-            
-            // Update product price
-            $product->set_regular_price($final_price);
-            $product->set_sale_price($final_price);
-            $product->set_price($final_price);
-            $product->set_stock_status('instock');
-            $product->save();
-            
-            // Update metadata
-            update_post_meta($product_id, '_last_scraped_time', time());
-            
-            $adjustment_info = ($adjustment_type === 'percent') ? 
-                "Percent: " . get_post_meta($product_id, '_price_adjustment_percent', true) . "%" : 
-                "Fixed: " . get_post_meta($product_id, '_price_adjustment_fixed', true) . " Tomans";
-                
-            update_post_meta($product_id, '_last_scrape_raw_result', 
-                "Local Scrape - Original: {$scraped_price}, {$adjustment_info}, Final: {$final_price}");
-            
-            $this->plugin->debug_log("Price adjustment completed for product #{$product_id}. Final price: {$final_price}", 'PRICE_ADJUSTMENT_SUCCESS');
-            
-            return true;
-        }
 
         /**
          * NEW: Apply price adjustment with Torob integration for local scraping
