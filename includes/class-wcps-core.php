@@ -271,7 +271,8 @@ if (!class_exists('WCPS_Core')) {
                 }
             }
 
-            foreach ($adjusted_variations_data as $row) {
+          foreach ($adjusted_variations_data as $row) {
+                // ... (کدهای استخراج ویژگی‌ها - بدون تغییر) ...
                 $variation_attributes = [];
                 foreach ($row as $key => $value) {
                     if (strpos($key, 'pa_') === 0 && !empty($value)) {
@@ -288,18 +289,32 @@ if (!class_exists('WCPS_Core')) {
                 $scraped_keys[] = $variation_key;
 
                 $variation_price = (float) $row['price'];
+                // محاسبه وضعیت موجودی بر اساس دیتای اسکرپ
                 $stock_status = isset($row['stock']) && $row['stock'] === 'موجود در انبار' && $variation_price > 0 ? 'instock' : 'outofstock';
 
                 if (isset($existing_variations_map[$variation_key])) {
+                    // --- بروزرسانی واریشن موجود ---
                     $variation_id = $existing_variations_map[$variation_key];
+                    
+                    // +++ FIX START: بررسی محافظت قبل از آپدیت +++
+                    if (get_post_meta($variation_id, '_wcps_is_protected', true) === 'yes') {
+                        $this->plugin->debug_log("Variation #{$variation_id} is protected. Skipping UPDATE (Price/Stock kept as manual).");
+                        continue; // پرش به واریشن بعدی (دست نزن!)
+                    }
+                    // +++ FIX END +++
+
                     $variation = wc_get_product($variation_id);
-                    $variation->set_regular_price($variation_price);
-                    $variation->set_sale_price($variation_price);
-                    $variation->set_price($variation_price);
-                    $variation->set_stock_status($stock_status);
-                    $variation->save();
-                    $this->plugin->debug_log("Updated variation #{$variation_id} for product #{$pid} with price {$variation_price}.");
+                    if ($variation) {
+                        $variation->set_regular_price($variation_price);
+                        $variation->set_sale_price($variation_price);
+                        $variation->set_price($variation_price);
+                        $variation->set_stock_status($stock_status);
+                        $variation->save();
+                        $this->plugin->debug_log("Updated variation #{$variation_id} for product #{$pid} with price {$variation_price}.");
+                    }
                 } else {
+                    // --- ایجاد واریشن جدید ---
+                    // واریشن جدید که هنوز محافظت ندارد، پس ساخته می‌شود
                     $variation = new WC_Product_Variation();
                     $variation->set_parent_id($pid);
                     $variation->set_attributes($variation_attributes);
@@ -311,7 +326,6 @@ if (!class_exists('WCPS_Core')) {
                     $this->plugin->debug_log("Created new variation #{$variation_id} for product #{$pid}.");
                 }
             }
-
             // حذف متغیرهای قدیمی
             // --- تغییر استراتژی: سافت دیلیت (ناموجود کردن به جای حذف) ---
             foreach ($existing_variations_map as $key => $variation_id) {
